@@ -23,6 +23,7 @@ import me.rerere.hugeicons.stroke.Clock02
 import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.Upload02
 import me.rerere.hugeicons.stroke.Zap
+import me.rerere.hugeicons.stroke.Message01
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.utils.formatNumber
 import me.rerere.rikkahub.utils.toFixed
@@ -115,6 +116,21 @@ fun ChatMessageNerdLine(
                             }
                         )
                     }
+                }
+                
+                if (settings.showWordCount) {
+                    StatsItem(
+                        icon = {
+                            Icon(
+                                imageVector = HugeIcons.Message01,
+                                contentDescription = "Word Count",
+                                modifier = Modifier.size(12.dp)
+                            )
+                        },
+                        content = {
+                            Text(text = "${message.content.length} 字")
+                        }
+                    )
                 }
             }
         }
