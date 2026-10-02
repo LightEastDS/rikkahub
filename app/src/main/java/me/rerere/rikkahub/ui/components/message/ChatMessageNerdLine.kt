@@ -128,7 +128,8 @@ fun ChatMessageNerdLine(
                             )
                         },
                         content = {
-                            Text(text = "${message.content.length} 字")
+                            val charCount = message.parts.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().sumOf { it.text.length }
+                            Text(text = "$charCount 字")
                         }
                     )
                 }

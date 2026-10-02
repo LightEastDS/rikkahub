@@ -68,7 +68,17 @@ android {
                     storePassword = storePasswordValue
                     keyAlias = keyAliasValue
                     keyPassword = keyPasswordValue
+                } else {
+                    storeFile = file("../my-release-key.jks")
+                    storePassword = "password"
+                    keyAlias = "my-alias"
+                    keyPassword = "password"
                 }
+            } else {
+                storeFile = file("../my-release-key.jks")
+                storePassword = "password"
+                keyAlias = "my-alias"
+                keyPassword = "password"
             }
         }
     }
