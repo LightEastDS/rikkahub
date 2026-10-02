@@ -357,7 +357,7 @@ class SettingsStore(
                     providers.add(defaultProvider.copyProvider())
                 }
             }
-            providers = providers.map { provider ->
+            providers = providers.filter { it.name !in listOf("AiHubMix", "APIMart", "随想AI网关", "MaruCode") }.map { provider ->
                 val defaultProvider = DEFAULT_PROVIDERS.find { it.id == provider.id }
                 if (defaultProvider != null) {
                     provider.copyProvider(
@@ -815,13 +815,6 @@ private val DEFAULT_TTS_PROVIDERS = listOf(
         id = DEFAULT_SYSTEM_TTS_ID,
         name = "",
     ),
-    TTSProviderSetting.OpenAI(
-        id = Uuid.parse("e36b22ef-ca82-40ab-9e70-60cad861911c"),
-        name = "AiHubMix",
-        baseUrl = "https://aihubmix.com/v1",
-        model = "gpt-4o-mini-tts",
-        voice = "alloy",
-    )
 )
 
 internal val DEFAULT_ASSISTANTS_IDS = DEFAULT_ASSISTANTS.map { it.id }
