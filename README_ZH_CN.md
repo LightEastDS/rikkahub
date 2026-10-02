@@ -1,6 +1,6 @@
 <div align="center">
   <img src="docs/icon.png" alt="App 图标" width="100" />
-  <h1>RikkaHub</h1>
+  <h1>RikkaHub (LightEastDS 修改版)</h1><br/>**这是 RikkaHub 原项目的修改版分支，增加了以下新功能：**<br/>- **字数统计**：可以在消息下方显示消息的具体字数。<br/>- **楼层显示**：在对话中显示当前消息是第几楼（例如 #1, #2 等）。<br/>
 
 一个原生Android LLM 聊天客户端，支持切换不同的供应商进行聊天 🤖💬
 

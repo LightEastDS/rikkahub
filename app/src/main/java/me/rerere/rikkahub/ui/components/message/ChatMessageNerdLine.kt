@@ -37,6 +37,7 @@ fun ChatMessageNerdLine(
     message: UIMessage,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+    nodeIndex: Int = -1,
 ) {
     val settings = LocalSettings.current.displaySetting
 
@@ -47,6 +48,21 @@ fun ChatMessageNerdLine(
                 itemVerticalAlignment = Alignment.CenterVertically,
                 modifier = modifier.padding(horizontal = 4.dp),
             ) {
+                if (nodeIndex >= 0) {
+                    StatsItem(
+                        icon = {
+                            Icon(
+                                imageVector = HugeIcons.Message01,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        },
+                        content = {
+                            Text(text = "#${nodeIndex + 1}")
+                        }
+                    )
+                }
+
                 val usage = message.usage
                 if (settings.showTokenUsage && usage != null) {
                     // Input tokens

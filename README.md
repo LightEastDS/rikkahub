@@ -1,14 +1,12 @@
 <div align="center">
   <img src="docs/icon.png" alt="App Icon" width="100" />
-  <h1>RikkaHub</h1>
+  <h1>RikkaHub (LightEastDS Fork)</h1>
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rikkahub/rikkahub)
-[![Ask DeepWiki](https://img.shields.io/badge/zread.ai-blue?style=flat&logo=readthedocs)](https://zread.ai/rikkahub/rikkahub)
+A native Android LLM chat client that supports switching between different providers for conversations 🤖💬
 
-A native Android LLM chat client that supports switching between different providers for
-conversations 🤖💬
-
-Click to join our Discord server 👉 [【RikkaHub】](https://discord.gg/9weBqxe5c4)
+**This is a modified fork of the original RikkaHub project. It adds the following features:**
+- **Word count display**: Shows the character count of each message.
+- **Message floor display**: Shows the chronological floor number of each message (e.g. #1, #2).
 
 [简体中文](README_ZH_CN.md) | [繁體中文](README_ZH_TW.md) | English
 </div>
