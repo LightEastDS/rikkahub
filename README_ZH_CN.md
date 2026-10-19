@@ -1,12 +1,10 @@
 <div align="center">
   <img src="docs/icon.png" alt="App 图标" width="100" />
-  <h1>RikkaHub (LightEastDS 修改版)</h1><br/>**这是 RikkaHub 原项目的修改版分支，增加了以下新功能：**<br/>- **字数统计**：可以在消息下方显示消息的具体字数。<br/>- **楼层显示**：在对话中显示当前消息是第几楼（例如 #1, #2 等）。<br/>
+  <h1>RikkaHub (LightEastDS 修改版)</h1>
 
-一个原生Android LLM 聊天客户端，支持切换不同的供应商进行聊天 🤖💬
+一个原生 Android LLM 聊天客户端，支持灵活切换不同的 AI 提供商进行对话 🤖💬
 
 [English](README.md) | [繁體中文](README_ZH_TW.md) | 简体中文
-
-点击链接加入群聊 👉 [【RikkaHub】](https://qm.qq.com/q/I8MSU0FkOu)
 
 </div>
 
@@ -14,74 +12,91 @@
   <img src="docs/img/poster.png" alt="RikkaHub" width="800" />
 </div>
 
+## 🌟 本分支定制特性
 
-## 🚀 下载
+这是基于 RikkaHub 原项目维护的定制与纯净化修改版分支（LightEastDS Fork），主要包含以下增强与改动：
 
-🔗 [前往官网下载](https://rikka-ai.com/download)（推荐）
+1. **楼层轮次标识 (Floor Turn Indicator)**
+   - 每条消息底部状态栏清晰展示所在楼层序号（如 `1`、`2`、`3`...），方便长会话快速定位。
+2. **隐藏楼层功能 (`/hide`)**
+   - 在输入框中使用 `/hide` 指令即可精准隐藏指定楼层的消息上下文：
+     - `/hide 5`：隐藏第 5 层消息。
+     - `/hide 3-18`：隐藏第 3 层至第 18 层（均包含）之间的所有消息。
+     - `/unhide 5` 或 `/unhide 3-18`：取消隐藏对应楼层。
+   - **被隐藏的消息将不再作为上下文请求发送给 AI 模型**，既节省上下文 Token，又能消除无关历史的干扰。
+   - 消息操作菜单中也提供了快捷切换隐藏/恢复上下文的入口。
+3. **消息字数统计 (Word Count)**
+   - 在每条消息下方状态栏实时显示该消息的具体字符数。可在 **设置 -> 界面显示设置** 中按需开关。
+4. **彻底纯净化与去商业化 (Clean & De-commercialized)**
+   - 彻底移除了原版内置并锁定的商业中转站提供商及推广返利信息（AFF）。
+   - 移除了启动 100 次后的赞助弹窗提示以及设置页面的捐赠菜单。
+   - 移除了针对特定中转站的隐藏请求头追踪与硬编码优惠角标。
+5. **正式签名与构建优化 (Build & Packaging)**
+   - 内置独立正式发布签名，生成开箱即用的 Release APK，杜绝国内主流厂商系统（如小米澎湃 OS、OPPO ColorOS 等）报“缺乏开发者证书”的拦截问题。
+   - 构建脚本集成国内 Maven 镜像加速，提升依赖下载与编译速度。
 
-🔗 [前往 Google Play 下载](https://play.google.com/store/apps/details?id=me.rerere.rikkahub)
+---
 
-> [!WARNING]
-> RikkaHub 存在许多 fork 版本，fork 版本出现问题与 RikkaHub 无关，请谨慎使用 fork 版本，避免隐私泄露或者过度索要权限问题。
+## 🚀 下载安装
 
+请前往本项目的 GitHub Releases 页面下载最新版本：
+
+🔗 **[GitHub Releases 下载](https://github.com/LightEastDS/rikkahub/releases)**
+
+推荐下载 `app-arm64-v8a-release.apk`（适用于绝大多数现代 Android 设备）。
+
+---
 
 ## ✨ 功能特色
 
-- 🎨 现代化安卓APP设计（Material 3 Expressive / 预测性返回）和 🌙 暗色模式
-- 📦 工作区：基于 proot 的 Linux 智能体环境
+- 🎨 现代化安卓应用设计（Material 3 Expressive / 预测性返回）与 🌙 暗色模式
+- 📦 工作区：基于 PRoot 的 Linux 智能体环境
 - 🎬 媒体生成（图片、视频）
-- 🖥️ Web多端访问支持
-- 🛠️ MCP 与 Skills 支持
-- 🔄 多种类型的供应商支持，自定义 API / URL / 模型（目前支持 OpenAI、Google、Anthropic）
-- 🖼️ 多模态输入支持
-- 📝 Markdown 渲染（支持代码高亮、数学公式、表格、Mermaid）
-- 🔍 搜索功能（Exa、Tavily、Zhipu、LinkUp、Brave、Perplexity、..）
-- 🧩 Prompt 变量（模型名称、时间等）
-- 🤳 二维码导出和导入提供商
-- 🤖 智能体自定义
-- 🧠 基于文件的记忆
-- 📝 AI翻译
-- 🌐 自定义HTTP请求头和请求体
+- 🖥️ Web 多端访问支持（支持通过浏览器在电脑等设备上访问与聊天）
+- 🛠️ MCP 与 Skills 扩展支持
+- 🔄 多种类型的供应商支持，自定义 API / URL / 模型（支持 OpenAI、Google Gemini、Anthropic 兼容接口）
+- 🖼️ 多模态输入支持（图片、文本文件、PDF、Docx、音频、视频）
+- 📝 Markdown 高性能渲染（支持代码高亮、LaTeX 数学公式、表格、Mermaid 图表）
+- 🔍 搜索功能（Exa、Tavily、Zhipu、LinkUp、Brave、Perplexity 等）
+- 🧩 Prompt 变量支持（模型名称、当前时间等）
+- 🤳 二维码快速导出与导入提供商配置
+- 🤖 智能体自定义配置
+- 🧠 基于文件的长期记忆
+- 📝 AI 消息实时翻译
+- 🌐 自定义 HTTP 请求头和请求正文
 
-## ✨ 开发
+---
 
-> [!IMPORTANT]
-> 本项目不接受 Pull Request（PR）。
+## 🛠️ 项目构建与开发
 
-本项目使用[Android Studio](https://developer.android.com/studio)开发。
+本项目使用 [Android Studio](https://developer.android.com/studio) 进行开发。
 
-技术栈文档:
+### 技术栈
 
-- [Kotlin](https://kotlinlang.org/) (开发语言)
-- [Koin](https://insert-koin.io/) (依赖注入)
-- [Jetpack Compose](https://developer.android.com/jetpack/compose) (UI 框架)
-- [DataStore](https://developer.android.com/topic/libraries/architecture/datastore?hl=zh-cn#preferences-datastore) (
-  偏好数据存储)
-- [Room](https://developer.android.com/training/data-storage/room) (数据库)
-- [Coil](https://coil-kt.github.io/coil/) (图片加载)
-- [Material 3 Expressive](https://m3.material.io/) (UI 设计)
-- [Navigation 3](https://developer.android.com/guide/navigation/navigation-3) (导航)
-- [Okhttp](https://square.github.io/okhttp/) (HTTP 客户端)
-- [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) (Json序列化)
+- [Kotlin](https://kotlinlang.org/)（开发语言）
+- [Jetpack Compose](https://developer.android.com/jetpack/compose)（声明式 UI 框架）
+- [Material 3 Expressive](https://m3.material.io/)（UI 设计规范）
+- [Koin](https://insert-koin.io/)（依赖注入）
+- [Room](https://developer.android.com/training/data-storage/room)（本地数据库）
+- [DataStore](https://developer.android.com/topic/libraries/architecture/datastore?hl=zh-cn#preferences-datastore)（键值偏好存储）
+- [OkHttp](https://square.github.io/okhttp/)（网络客户端）
+- [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization)（JSON 序列化）
+- [Coil](https://coil-kt.github.io/coil/)（图片加载）
 
-> [!TIP]
-> 你需要在 `app` 文件夹下添加 `google-services.json` 文件才能构建应用。
+### 构建步骤
 
+1. 克隆本仓库到本地：
+   ```bash
+   git clone https://github.com/LightEastDS/rikkahub.git
+   ```
+2. 在 `app` 目录下添加你的 `google-services.json` 文件。
+3. 编译 Debug 版本或 Release 版本：
+   ```bash
+   ./gradlew :app:assembleRelease
+   ```
 
-## ⭐ Star History
+---
 
-如果喜欢这个项目，请给个Star ⭐
+## 📄 开源许可证
 
-<a href="https://www.star-history.com/?type=date&repos=re-ovo%2Frikkahub">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&theme=dark&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
- </picture>
-</a>
-
-## 📄 许可证
-
-本项目基于 [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0) 开源。
-
-
+本项目基于 [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0) 协议开源。

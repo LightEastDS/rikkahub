@@ -53,6 +53,8 @@ import me.rerere.hugeicons.stroke.Share04
 import me.rerere.hugeicons.stroke.StopCircle
 import me.rerere.hugeicons.stroke.TextSelection
 import me.rerere.hugeicons.stroke.Translate
+import me.rerere.hugeicons.stroke.View
+import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.WebDesign01
 import me.rerere.rikkahub.R
@@ -265,6 +267,7 @@ fun ChatMessageActionsSheet(
     onSelectAndCopy: () -> Unit,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    onToggleHide: (() -> Unit)? = null,
     onWebViewPreview: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
@@ -292,6 +295,18 @@ fun ChatMessageActionsSheet(
                             else R.string.chat_message_add_favorite
                         ),
                         onClick = onToggleFavorite,
+                    )
+                )
+            }
+            if (onToggleHide != null) {
+                add(
+                    MessageSheetAction(
+                        icon = if (message.isHidden) HugeIcons.View else HugeIcons.ViewOff,
+                        label = stringResource(
+                            if (message.isHidden) R.string.chat_message_unhide_context
+                            else R.string.chat_message_hide_context
+                        ),
+                        onClick = onToggleHide,
                     )
                 )
             }

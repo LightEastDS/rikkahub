@@ -2,88 +2,101 @@
   <img src="docs/icon.png" alt="App Icon" width="100" />
   <h1>RikkaHub (LightEastDS Fork)</h1>
 
-A native Android LLM chat client that supports switching between different providers for conversations 🤖💬
+A native Android LLM chat client that supports flexibly switching between different AI providers 🤖💬
 
-**This is a modified fork of the original RikkaHub project. It adds the following features:**
-- **Word count display**: Shows the character count of each message.
-- **Message floor display**: Shows the chronological floor number of each message (e.g. #1, #2).
+[English](README.md) | [繁體中文](README_ZH_TW.md) | [简体中文](README_ZH_CN.md)
 
-Click to join our Discord server 👉 [【RikkaHub】](https://discord.gg/9weBqxe5c4)
-
-[简体中文](README_ZH_CN.md) | [繁體中文](README_ZH_TW.md) | English
 </div>
 
 <div align="center">
   <img src="docs/img/poster.png" alt="RikkaHub" width="800" />
 </div>
 
-## 🚀 Download
+## 🌟 Customizations in this Fork
 
-🔗 [Download from Website](https://rikka-ai.com/download) (Recommended)
+This is a customized and de-commercialized fork of RikkaHub maintained by LightEastDS, featuring the following enhancements:
 
-🔗 [Download from Google Play](https://play.google.com/store/apps/details?id=me.rerere.rikkahub)
+1. **Message Floor Indicator (Turn Numbers)**
+   - Chronological turn numbers (`1`, `2`, `3`...) are displayed directly in each message's nerd stats line to help quickly track dialogue turns.
+2. **Hide Floor Context (`/hide`)**
+   - Precise control over which messages are included in prompt requests via the `/hide` chat command:
+     - `/hide 5`: Hides the 5th message floor.
+     - `/hide 3-18`: Hides all messages between floor 3 and 18 inclusive.
+     - `/unhide 5` or `/unhide 3-18`: Unhides the corresponding floors.
+   - **Hidden messages are excluded from AI model context requests**, saving prompt tokens and eliminating distractions from irrelevant history.
+   - Messages also feature a quick toggle in the action bottom sheet.
+3. **Message Word Count Display**
+   - Displays real-time character count for each message in the stats bar. Can be enabled or disabled in **Settings -> Display Settings**.
+4. **Pure & De-commercialized**
+   - Completely stripped of built-in locked third-party proxy sponsors, referral links, and affiliate parameters (AFF).
+   - Removed the 100-launch donation alert popup and the donation entry in Settings.
+   - Removed hidden request tracking headers and hardcoded promotional badges.
+5. **Production Release Signing & Fast Domestic Builds**
+   - Includes official release signing configurations to ensure packaged APKs can be directly installed on Android OEM skins (MIUI/HyperOS, ColorOS, etc.) without "missing certificate" blocks.
+   - Integrated domestic Maven repository mirrors for high-speed builds.
 
-> [!WARNING]
-> There are many forked versions of RikkaHub. Issues with forks are unrelated to RikkaHub, so please use forks with caution to avoid privacy leaks or excessive permission requests.
+---
+
+## 🚀 Download & Installation
+
+Download the latest version from our GitHub Releases page:
+
+🔗 **[GitHub Releases](https://github.com/LightEastDS/rikkahub/releases)**
+
+Recommended: `app-arm64-v8a-release.apk` (for all modern Android devices).
+
+---
 
 ## ✨ Features
 
-- 🎨 Material 3 Expressive design and 🌙 Dark mode
-- 📦 Workspace: a proot-based Linux agent environment
-- 🎬 Media generation (image and video)
-- 🔄 Multiple AI Provider Support: custom API / URL / models (all OpenAI, Google, Anthropic compatible api)
-- 🖼️ Multimodal input support (Image, Text Documentation, PDF, Docx)
-- 🖥️ Web access for multi-platform use
-- 🛠️ MCP and Skills support
-- 📝 Markdown Rendering (with code highlighting, Latex formulas, tables, Mermaid)
-- 🔍 Search capabilities (Exa, Tavily, Zhipu, LinkUp, Brave, Perplexity, etc.)
-- 🧩 Prompt variables (model name, time, etc.)
-- 🤳 QR code export and import for providers
+- 🎨 Material 3 Expressive design with predictive back gesture and 🌙 Dark Mode
+- 📦 Workspace: a PRoot-based Linux agent environment
+- 🎬 Media generation (image and video generation)
+- 🖥️ Web access: seamless multi-platform access via desktop browsers
+- 🛠️ MCP and Skills extensions support
+- 🔄 Multiple AI Provider Support: custom API / URL / models (OpenAI, Google Gemini, Anthropic compatible)
+- 🖼️ Multimodal input support (Images, Text Documentation, PDF, Docx, Audio, Video)
+- 📝 Markdown rendering with code highlighting, LaTeX math formulas, tables, and Mermaid charts
+- 🔍 Web search capabilities (Exa, Tavily, Zhipu, LinkUp, Brave, Perplexity, etc.)
+- 🧩 Prompt variables (model name, current time, etc.)
+- 🤳 QR code export and import for provider settings
 - 🤖 Agent customization
-- 🧠 File-based memory
-- 📝 AI Translation
+- 🧠 File-based long-term memory
+- 📝 AI message translation
 - 🌐 Custom HTTP request headers and request bodies
-- 💌 Silly Tavern character card import
 
-## ✨ Development
+---
 
-> [!IMPORTANT]
-> This project does not accept pull requests (PRs).
+## 🛠️ Build & Development
 
-This project is developed using [Android Studio](https://developer.android.com/studio).
+This project is developed with [Android Studio](https://developer.android.com/studio).
 
-Technology stack documentation:
+### Tech Stack
 
 - [Kotlin](https://kotlinlang.org/) (Development language)
-- [Koin](https://insert-koin.io/) (Dependency Injection)
 - [Jetpack Compose](https://developer.android.com/jetpack/compose) (UI framework)
-- [DataStore](https://developer.android.com/topic/libraries/architecture/datastore) (Preference data
-  storage)
+- [Material 3 Expressive](https://m3.material.io/) (Design system)
+- [Koin](https://insert-koin.io/) (Dependency Injection)
 - [Room](https://developer.android.com/training/data-storage/room) (Database)
-- [Coil](https://coil-kt.github.io/coil/) (Image loading)
-- [Material 3 Expressive](https://m3.material.io/) (UI design)
-- [Navigation 3](https://developer.android.com/guide/navigation/navigation-3) (Navigation)
-- [Okhttp](https://square.github.io/okhttp/) (HTTP client)
+- [DataStore](https://developer.android.com/topic/libraries/architecture/datastore) (Preferences storage)
+- [OkHttp](https://square.github.io/okhttp/) (HTTP client)
 - [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) (JSON serialization)
+- [Coil](https://coil-kt.github.io/coil/) (Image loading)
 
-> [!TIP]
-> You need a `google-services.json` file at `app` folder to build the app.
+### Building the Project
 
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/LightEastDS/rikkahub.git
+   ```
+2. Place your `google-services.json` file inside the `app/` folder.
+3. Build the Release APK:
+   ```bash
+   ./gradlew :app:assembleRelease
+   ```
 
-## ⭐ Star History
-
-If you like this project, please give it a star ⭐
-
-<a href="https://www.star-history.com/?type=date&repos=re-ovo%2Frikkahub">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&theme=dark&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
- </picture>
-</a>
+---
 
 ## 📄 License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
-
-

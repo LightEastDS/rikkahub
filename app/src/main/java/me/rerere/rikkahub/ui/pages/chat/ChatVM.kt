@@ -259,6 +259,19 @@ class ChatVM(
         }
     }
 
+    fun executeHideCommand(command: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = chatService.executeHideCommand(_conversationId, command)
+            onResult(result.success, result.message)
+        }
+    }
+
+    fun toggleHideMessage(messageId: Uuid) {
+        viewModelScope.launch {
+            chatService.toggleHideMessage(_conversationId, messageId)
+        }
+    }
+
     fun showDeleteBlockedWhileGeneratingError() {
         chatService.addError(
             error = IllegalStateException("请先停止生成再删除消息"),

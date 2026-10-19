@@ -213,7 +213,7 @@ class ChatRequestFactory(
                 // 工具prompt
                 turn.tools.forEach { tool ->
                     appendLine()
-                    append(tool.systemPrompt(turn.model, messages))
+                    append(tool.systemPrompt(turn.model, messages.filter { !it.isHidden }))
                 }
             }
             if (system.isNotBlank()) {

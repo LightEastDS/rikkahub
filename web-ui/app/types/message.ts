@@ -29,4 +29,5 @@ export interface UIMessage {
   generationTimeMs?: number | null;
   translation?: string | null;
   isContextCheckpoint?: boolean;
+  isHidden?: boolean;
 }

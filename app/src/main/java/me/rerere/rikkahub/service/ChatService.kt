@@ -101,6 +101,12 @@ enum class ChatErrorSolution {
     CheckFastModelSettings,
 }
 
+data class HideCommandResult(
+    val success: Boolean,
+    val message: String,
+    val affectedNodesCount: Int = 0,
+)
+
 class ChatService(
     private val context: Application,
     private val appScope: AppScope,
@@ -370,6 +376,13 @@ class ChatService(
 
     fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
+        val commandText = (content.singleOrNull() as? UIMessagePart.Text)?.text?.trim()
+        if (commandText != null && isHideCommand(commandText)) {
+            appScope.launch {
+                executeHideCommand(conversationId, commandText)
+            }
+            return
+        }
         val session = sessionManager.getOrCreate(conversationId)
         synchronized(session) {
             if (session.messageQueue.state.value.messages.isEmpty()) session.messageQueue.resume()
@@ -1216,5 +1229,100 @@ class ChatService(
         if (jobs.isEmpty()) return
         jobs.forEach { it.join() }
         if (session.isInitialized) finishInterruptedPendingTools(session)
+    }
+
+    suspend fun executeHideCommand(conversationId: Uuid, commandText: String): HideCommandResult {
+        val trimmed = commandText.trim()
+        val match = HIDE_CMD_REGEX.matchEntire(trimmed)
+            ?: return HideCommandResult(false, "无效指令")
+
+        val action = match.groupValues[1].lowercase()
+        val isHide = action == "hide"
+        val args = match.groupValues[2].trim()
+
+        if (args.isEmpty()) {
+            return HideCommandResult(false, "请指定要${if (isHide) "隐藏" else "恢复"}的楼层。示例: /hide 5 或 /hide 3-18")
+        }
+
+        val tokens = RANGE_TOKEN_REGEX.findAll(args).toList()
+        if (tokens.isEmpty()) {
+            return HideCommandResult(false, "无效的楼层参数。示例: /hide 5 或 /hide 3-18")
+        }
+
+        val targetFloors = mutableSetOf<Int>()
+        for (token in tokens) {
+            val start = token.groupValues[1].toIntOrNull() ?: continue
+            val end = token.groupValues[2].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: start
+            val low = minOf(start, end)
+            val high = maxOf(start, end)
+            for (f in low..high) {
+                targetFloors.add(f)
+            }
+        }
+
+        if (targetFloors.isEmpty()) {
+            return HideCommandResult(false, "未解析到有效楼层数字")
+        }
+
+        var affectedCount = 0
+        var totalFloors = 0
+        mutate(conversationId) { conversation ->
+            totalFloors = conversation.messageNodes.size
+            val validIndices = targetFloors.map { it - 1 }.filter { it in 0 until totalFloors }.toSet()
+            affectedCount = validIndices.size
+            if (validIndices.isEmpty()) {
+                conversation
+            } else {
+                val newNodes = conversation.messageNodes.mapIndexed { index, node ->
+                    if (index in validIndices) {
+                        node.copy(messages = node.messages.map { it.copy(isHidden = isHide) })
+                    } else {
+                        node
+                    }
+                }
+                conversation.copy(messageNodes = newNodes)
+            }
+        }
+
+        if (affectedCount == 0) {
+            return HideCommandResult(false, "指定楼层不存在（当前会话共 $totalFloors 层）")
+        }
+
+        val actionDesc = if (isHide) "隐藏" else "恢复"
+        val msg = if (targetFloors.size == 1) {
+            "已${actionDesc}第 ${targetFloors.first()} 层消息上下文"
+        } else {
+            val minF = targetFloors.minOrNull() ?: 1
+            val maxF = targetFloors.maxOrNull() ?: 1
+            "已${actionDesc}第 $minF-$maxF 层消息上下文（共 $affectedCount 层）"
+        }
+        return HideCommandResult(true, msg, affectedCount)
+    }
+
+    suspend fun toggleHideMessage(conversationId: Uuid, messageId: Uuid) {
+        mutate(conversationId) { conversation ->
+            conversation.copy(
+                messageNodes = conversation.messageNodes.map { node ->
+                    if (node.messages.any { it.id == messageId }) {
+                        node.copy(
+                            messages = node.messages.map { msg ->
+                                if (msg.id == messageId) msg.copy(isHidden = !msg.isHidden) else msg
+                            }
+                        )
+                    } else {
+                        node
+                    }
+                }
+            )
+        }
+    }
+
+    companion object {
+        private val HIDE_CMD_REGEX = Regex("""^/(hide|unhide|show)\b(.*)$""", RegexOption.IGNORE_CASE)
+        private val RANGE_TOKEN_REGEX = Regex("""(\d+)(?:\s*-\s*(\d+))?""")
+
+        fun isHideCommand(text: String): Boolean {
+            return HIDE_CMD_REGEX.matches(text.trim())
+        }
     }
 }

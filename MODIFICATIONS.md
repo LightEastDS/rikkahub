@@ -81,6 +81,11 @@
 | `SettingsNormalization.kt` | 纯净化 & 迁移 | 加入配置规整与老用户数据加载时的主动过滤清除逻辑 |
 | `Request.kt` (ai 模块) | 纯净化 | 移除对赞助商域名的 `APP-Code` 隐藏请求头注入 |
 | `AIIconMatcher.kt` | 纯净化 | 移除赞助商图标规则与相关匹配正则 |
+| `Message.kt` (ai 模块) | 功能新增 | `UIMessage` 增加 `isHidden` 字段并在 `limitContext` 中自动过滤被隐藏消息 |
+| `ChatService.kt` | 功能新增 | 增加 `/hide`、`/unhide` 楼层指令拦截与解析执行器，以及切换单条消息隐藏状态 API |
+| `ChatMessageNerdLine.kt` | UI 优化 | 楼层图标升级为双向轮次图标（`ArrowLeftRight`），取消数字前的 `#`，显示隐藏状态 |
+| `ChatMessageActions.kt` | 功能支持 | 消息操作菜单新增「隐藏/恢复上下文」快捷入口 |
+| `web-ui` 相关组件 | 功能与 UI | 同步支持轮次图标、去掉 `#`、支持 `isHidden` 状态显示与上下文排除 |
 
 ---
 
@@ -89,4 +94,9 @@
 * **v2.5.6**：初始构建版本，添加字数统计支持，适配国内签名。
 * **v2.5.6.1**：同步上游主干代码；新增消息楼层显示（#1, #2）；清理 README 及应用界面内的赞助商和打赏入口。
 * **v2.5.6.2**：彻底拔除 DataStore 默认与推荐中的锁定中转商提供者；加入老配置自动过滤清洗逻辑；移除请求头推广代码。
-* **v3.0.0.1**：同步上游官方 3.0.0 大版本更新（全面升级至 Material 3 Expressive 风格、统一 mediagen 媒体生成模块、Markdown 收敛等）；适配新版架构下的设置拆分（Settings.kt、DefaultSettings.kt、SettingsNormalization.kt）与 UI 组件；保持字数统计、楼层编号、去商业化及独立签名优化。
+* **v3.0.0**：同步上游官方 3.0.0 大版本更新（全面升级至 Material 3 Expressive 风格、统一 mediagen 媒体生成模块、Markdown 收敛等）；适配新版架构下的设置拆分与 UI 组件；保持字数统计、楼层编号、去商业化及独立签名优化。
+* **v3.0.0.1**：
+  1. **楼层图标与格式更新**：将楼层指示器图标更换为往复轮次图标（HugeIcons `ArrowLeftRight` 与 Web 端 `ArrowRightLeft`），并且图标后不再添加 `#` 前缀（直接显示纯数字）。
+  2. **隐藏楼层功能 (`/hide`)**：在聊天输入框支持使用 `/hide 5`、`/hide 3-18` 等指令（以及 `/unhide`）隐藏指定楼层消息；消息操作面板中亦可快速切换隐藏状态；**被隐藏的消息将彻底排除在后续 AI 模型请求上下文之外**。
+  3. **彻底净化 README 文档**：重写中英文及繁体 `README`，彻底清除所有指向原项目的外部群组、官网下载、Google Play 链接、原项目 Star History 及一切商业赞助商宣传信息。
+

@@ -17,13 +17,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import kotlinx.datetime.toJavaLocalDateTime
+import androidx.compose.ui.res.stringResource
 import me.rerere.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowLeftRight
 import me.rerere.hugeicons.stroke.Clock02
 import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.Upload02
+import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.hugeicons.stroke.Message01
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.utils.formatNumber
 import me.rerere.rikkahub.utils.toFixed
@@ -52,13 +56,28 @@ fun ChatMessageNerdLine(
                     StatsItem(
                         icon = {
                             Icon(
-                                imageVector = HugeIcons.Message01,
+                                imageVector = HugeIcons.ArrowLeftRight,
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp)
                             )
                         },
                         content = {
-                            Text(text = "#${nodeIndex + 1}")
+                            Text(text = "${nodeIndex + 1}")
+                        }
+                    )
+                }
+
+                if (message.isHidden) {
+                    StatsItem(
+                        icon = {
+                            Icon(
+                                imageVector = HugeIcons.ViewOff,
+                                contentDescription = "Hidden",
+                                modifier = Modifier.size(12.dp)
+                            )
+                        },
+                        content = {
+                            Text(text = stringResource(R.string.chat_message_hidden))
                         }
                     )
                 }

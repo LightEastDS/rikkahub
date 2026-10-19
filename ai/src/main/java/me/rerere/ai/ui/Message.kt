@@ -34,6 +34,8 @@ data class UIMessage(
     val translation: String? = null,
     // 压缩检查点：此消息是它之前全部历史的摘要，组装请求时从最后一个检查点开始取
     val isContextCheckpoint: Boolean = false,
+    // 被隐藏的消息将不再作为上下文请求
+    val isHidden: Boolean = false,
     // 请求期间生成的内部消息；该标记仅在内存中使用
     @Transient
     val isSynthetic: Boolean = false,
@@ -173,9 +175,10 @@ private const val CONTEXT_KEEP_RATIO = 0.5f
  * @param limit 触发截断的消息条数上限, 小于等于 0 表示不限制
  */
 fun List<UIMessage>.limitContext(limit: Int): List<UIMessage> {
-    val checkpointIndex = indexOfLast { it.isContextCheckpoint }
-    if (checkpointIndex < 0) return limitMessageCount(limit)
-    return listOf(this[checkpointIndex]) + subList(checkpointIndex + 1, size).limitMessageCount(limit)
+    val visible = filter { !it.isHidden }
+    val checkpointIndex = visible.indexOfLast { it.isContextCheckpoint }
+    if (checkpointIndex < 0) return visible.limitMessageCount(limit)
+    return listOf(visible[checkpointIndex]) + visible.subList(checkpointIndex + 1, visible.size).limitMessageCount(limit)
 }
 
 /**

@@ -233,6 +233,7 @@ data class MessageDto(
     val generationTimeMs: Long? = null,
     val translation: String? = null,
     val isContextCheckpoint: Boolean = false,
+    val isHidden: Boolean = false,
 )
 
 @Serializable
@@ -376,4 +377,5 @@ fun UIMessage.toDto() = MessageDto(
     generationTimeMs = generationTimeMs,
     translation = translation,
     isContextCheckpoint = isContextCheckpoint,
+    isHidden = isHidden,
 )

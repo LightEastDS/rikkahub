@@ -52,7 +52,7 @@ class ConversationMetaGenerator(
                 UIMessage.user(
                     prompt.applyPlaceholders(
                         "locale" to Locale.getDefault().displayName,
-                        "content" to conversation.currentMessages
+                        "content" to conversation.currentMessages.filter { !it.isHidden }
                             .takeLast(recentMessages).joinToString("\n\n") { it.summaryAsText(maxLength = 500) },
                     )
                 ),

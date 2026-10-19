@@ -335,6 +335,17 @@ fun Route.conversationRoutes(
             call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
         }
 
+        // POST /api/conversations/{id}/messages/{messageId}/toggle-hide - Toggle hide status of a message
+        post("/{id}/messages/{messageId}/toggle-hide") {
+            val uuid = call.parameters["id"].toUuid("conversation id")
+            val messageId = call.parameters["messageId"].toUuid("message id")
+
+            chatService.initializeConversation(uuid)
+            chatService.toggleHideMessage(uuid, messageId)
+
+            call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
+        }
+
         // POST /api/conversations/{id}/nodes/{nodeId}/select - Switch branch selection for a message node
         post("/{id}/nodes/{nodeId}/select") {
             val uuid = call.parameters["id"].toUuid("conversation id")

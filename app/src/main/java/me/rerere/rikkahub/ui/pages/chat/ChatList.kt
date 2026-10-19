@@ -141,6 +141,7 @@ fun ChatList(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
+    onToggleHide: ((UIMessage) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
 ) {
     AnimatedContent(
@@ -183,6 +184,7 @@ fun ChatList(
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
+                onToggleHide = onToggleHide,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
             )
         }
@@ -232,6 +234,7 @@ private fun ChatListNormal(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
+    onToggleHide: ((UIMessage) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
@@ -389,6 +392,7 @@ private fun ChatListNormal(
                             onToggleFavorite = {
                                 onToggleFavorite?.invoke(node)
                             },
+                            onToggleHide = onToggleHide?.let { action -> { action(node.currentMessage) } },
                             onTranslate = onTranslate,
                             onClearTranslation = onClearTranslation,
                             onToolApproval = onToolApproval,

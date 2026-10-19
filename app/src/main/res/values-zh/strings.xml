@@ -226,6 +226,9 @@
   <string name="chat_input_file_read_failed">文件读取失败：%s</string>
   <string name="chat_message_add_favorite">添加收藏</string>
   <string name="chat_message_remove_favorite">取消收藏</string>
+  <string name="chat_message_hidden">已隐藏</string>
+  <string name="chat_message_hide_context">隐藏上下文</string>
+  <string name="chat_message_unhide_context">恢复上下文</string>
   <string name="chat_message_tool_approve">批准</string>
   <string name="chat_message_tool_ask_questions">询问 %d 个问题</string>
   <string name="chat_message_tool_call_generic">调用工具 %1$s</string>

@@ -11,3 +11,6 @@ local.properties
 .cursor
 .history
 .kotlin
+*.jks
+*.keystore
+task_instruction_*.md

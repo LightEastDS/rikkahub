@@ -79,6 +79,7 @@ export interface MessageDto {
   translation?: string | null;
   /** 压缩检查点：此消息是它之前全部历史的摘要，之前的消息不再发送给模型 */
   isContextCheckpoint?: boolean;
+  isHidden?: boolean;
 }
 
 export interface MessageNodeDto {

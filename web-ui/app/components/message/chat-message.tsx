@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import {
   ArrowDown,
+  ArrowRightLeft,
   ArrowUp,
   ChevronDown,
   ChevronLeft,
@@ -12,6 +13,7 @@ import {
   Clock3,
   Copy,
   Ellipsis,
+  EyeOff,
   FileDown,
   GitFork,
   Package,
@@ -49,6 +51,7 @@ interface ChatMessageProps {
   node: MessageNodeDto;
   message: MessageDto;
   loading?: boolean;
+  messageIndex?: number;
   isLastMessage?: boolean;
   assistant?: AssistantProfile | null;
   model?: ProviderModel | null;
@@ -130,13 +133,34 @@ function getDurationMs(createdAt: string, finishedAt?: string | null): number | 
 }
 
 function getNerdStats(
-  usage: TokenUsage,
+  usage: TokenUsage | null | undefined,
   createdAt: string,
   finishedAt: string | null | undefined,
   generationTimeMs: number | null | undefined,
   t: TFunction,
+  messageIndex?: number,
+  showTokenUsage: boolean = true,
+  isHidden: boolean = false,
 ) {
   const stats: Array<{ key: string; icon: React.ReactNode; label: string }> = [];
+
+  if (typeof messageIndex === "number") {
+    stats.push({
+      key: "turn",
+      icon: <ArrowRightLeft className="size-3" />,
+      label: `${messageIndex + 1}`,
+    });
+  }
+
+  if (isHidden) {
+    stats.push({
+      key: "hidden",
+      icon: <EyeOff className="size-3" />,
+      label: "已隐藏",
+    });
+  }
+
+  if (showTokenUsage && usage) {
 
   stats.push({
     key: "prompt",
@@ -181,6 +205,7 @@ function getNerdStats(
         value: durationSeconds.toFixed(1),
       }),
     });
+  }
   }
 
   return stats;
@@ -485,16 +510,14 @@ const ChatMessageActionsRow = React.memo(({
 const ChatMessageNerdLineRow = React.memo(({
   message,
   alignRight,
+  messageIndex,
 }: {
   message: MessageDto;
   alignRight: boolean;
+  messageIndex?: number;
 }) => {
   const { t } = useTranslation("message");
   const displaySetting = useSettingsStore((state) => state.settings?.displaySetting);
-
-  if (!displaySetting?.showTokenUsage || !message.usage) {
-    return null;
-  }
 
   const stats = getNerdStats(
     message.usage,
@@ -502,6 +525,9 @@ const ChatMessageNerdLineRow = React.memo(({
     message.finishedAt,
     message.generationTimeMs,
     t,
+    messageIndex,
+    displaySetting?.showTokenUsage ?? true,
+    message.isHidden ?? false,
   );
   if (stats.length === 0) return null;
 
@@ -622,6 +648,7 @@ export const ChatMessage = React.memo(({
   onDelete,
   onFork,
   onToolApproval,
+  messageIndex,
 }: ChatMessageProps) => {
   const isUser = message.role === "USER";
   const hasMessageContent = message.parts.some(hasRenderablePart);
@@ -642,7 +669,7 @@ export const ChatMessage = React.memo(({
 
   return (
     <div
-      className={cn("flex flex-col gap-4", isUser ? "items-end" : "items-start")}
+      className={cn("flex flex-col gap-4", isUser ? "items-end" : "items-start", message.isHidden && "opacity-75")}
       data-message-role={message.role.toLowerCase()}
       data-message-loading={loading || undefined}
     >
@@ -692,7 +719,7 @@ export const ChatMessage = React.memo(({
 
       <ChatMessageAnnotationsRow annotations={message.annotations} alignRight={isUser} />
 
-      <ChatMessageNerdLineRow message={message} alignRight={isUser} />
+      <ChatMessageNerdLineRow message={message} alignRight={isUser} messageIndex={messageIndex} />
     </div>
   );
 });
