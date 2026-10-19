@@ -64,19 +64,21 @@
 
 | 模块 / 路径 | 改动类型 | 详细说明 |
 | :--- | :--- | :--- |
-| `app/build.gradle.kts` | 签名与版本 | 配置 Release 签名密钥，更新版本号（`2.5.6.2`） |
+| `app/build.gradle.kts` | 签名与版本 | 配置 Release 签名密钥，更新版本号（`3.0.0.1`，versionCode 192） |
 | `settings.gradle.kts` | 依赖配置 | 引入阿里云 Maven 镜像仓库源加速编译 |
 | `README.md` / `README_ZH_CN.md` | 文档更新 | 移除赞助商与打赏链接，标注 Fork 分支新特性 |
 | `ChatMessageNerdLine.kt` | 功能新增 | 新增楼层 `#1, #2` 与字数统计信息展示组件 |
 | `ChatMessage.kt` | 功能支持 | 传递 `nodeIndex` 楼层索引至底层状态行 |
 | `ChatList.kt` | 功能支持 | 将消息列表的真实 item index 作为楼层号向下传递 |
-| `SettingPreferencesUIPage.kt` | UI 新增 | 新增「显示字数统计」开关设置项 |
+| `SettingPreferencesUIPage.kt` | UI 新增 | 新增「显示字数统计」开关设置项（适配 MD3 Expressive） |
 | `strings.xml` (中/英) | 国际化 | 增加字数统计功能的双语文本定义 |
 | `SettingPage.kt` | 纯净化 | 移除 100 次启动弹出的赞助对话框与捐赠设置条目 |
 | `SettingProviderPage.kt` | 纯净化 | 移除赞助中转站的硬编码“10% 优惠”角标 |
 | `DefaultProviders.kt` | 纯净化 | 移除默认内置且不可删除的 4 家赞助商模型配置 |
 | `RecommendedProviders.kt` | 纯净化 | 清空推广服务商推荐列表 |
-| `PreferencesStore.kt` | 纯净化 & 迁移 | 移除默认 TTS 赞助商；加入老用户数据加载时的主动过滤清除逻辑 |
+| `Settings.kt` | 功能支持 | 在 DisplaySetting 中持久化 `showWordCount` 配置 |
+| `DefaultSettings.kt` | 纯净化 | 移除默认 TTS 赞助商 `AiHubMix` |
+| `SettingsNormalization.kt` | 纯净化 & 迁移 | 加入配置规整与老用户数据加载时的主动过滤清除逻辑 |
 | `Request.kt` (ai 模块) | 纯净化 | 移除对赞助商域名的 `APP-Code` 隐藏请求头注入 |
 | `AIIconMatcher.kt` | 纯净化 | 移除赞助商图标规则与相关匹配正则 |
 
@@ -87,3 +89,4 @@
 * **v2.5.6**：初始构建版本，添加字数统计支持，适配国内签名。
 * **v2.5.6.1**：同步上游主干代码；新增消息楼层显示（#1, #2）；清理 README 及应用界面内的赞助商和打赏入口。
 * **v2.5.6.2**：彻底拔除 DataStore 默认与推荐中的锁定中转商提供者；加入老配置自动过滤清洗逻辑；移除请求头推广代码。
+* **v3.0.0.1**：同步上游官方 3.0.0 大版本更新（全面升级至 Material 3 Expressive 风格、统一 mediagen 媒体生成模块、Markdown 收敛等）；适配新版架构下的设置拆分（Settings.kt、DefaultSettings.kt、SettingsNormalization.kt）与 UI 组件；保持字数统计、楼层编号、去商业化及独立签名优化。
