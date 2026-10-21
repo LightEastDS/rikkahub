@@ -86,6 +86,7 @@
 | `ChatMessageNerdLine.kt` | UI 优化 | 楼层图标升级为双向轮次图标（`ArrowLeftRight`），取消数字前的 `#`，显示隐藏状态 |
 | `ChatMessageActions.kt` | 功能支持 | 消息操作菜单新增「隐藏/恢复上下文」快捷入口 |
 | `web-ui` 相关组件 | 功能与 UI | 同步支持轮次图标、去掉 `#`、支持 `isHidden` 状态显示与上下文排除 |
+| `Logging.kt` (common 模块) | 配置优化 | 将 HTTP 请求日志中的「记录请求」（`requestLoggingEnabled`）默认开启 |
 
 ---
 
