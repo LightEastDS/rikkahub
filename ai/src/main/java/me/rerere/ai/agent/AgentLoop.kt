@@ -160,20 +160,25 @@ internal class AgentLoop(
     private suspend fun executeTools() {
         val tools = checkNotNull(message).getTools().filter { !it.isExecuted }
         for (tool in tools) {
+            // 只给真正运行的工具计时；开始时先写一次，界面才能在执行中实时显示耗时
+            val runs = tool.approvalState == ToolApprovalState.Auto || tool.approvalState == ToolApprovalState.Approved
+            if (runs) updateTool(tool.toolCallId) { it.copy(startedAt = Clock.System.now(), finishedAt = null) }
             val output = execute(tool)
-            val current = checkNotNull(message)
-            update(
-                current.copy(
-                    parts = current.parts.map { part ->
-                        if (part is UIMessagePart.Tool && part.toolCallId == tool.toolCallId) {
-                            part.copy(output = output)
-                        } else {
-                            part
-                        }
-                    }
-                )
-            )
+            updateTool(tool.toolCallId) {
+                it.copy(output = output, finishedAt = if (runs) Clock.System.now() else it.finishedAt)
+            }
         }
+    }
+
+    private suspend fun updateTool(toolCallId: String, transform: (UIMessagePart.Tool) -> UIMessagePart.Tool) {
+        val current = checkNotNull(message)
+        update(
+            current.copy(
+                parts = current.parts.map { part ->
+                    if (part is UIMessagePart.Tool && part.toolCallId == toolCallId) transform(part) else part
+                }
+            )
+        )
     }
 
     private suspend fun execute(tool: UIMessagePart.Tool): List<UIMessagePart> =
@@ -223,8 +228,9 @@ private fun errorOutput(error: String): List<UIMessagePart> =
 private fun UIMessage.withStepStats(stepBase: UIMessage, stepTime: Duration): UIMessage = copy(
     usage = stepBase.usage.sum(usage),
     generationTimeMs = (stepBase.generationTimeMs ?: 0L) + stepTime.inWholeMilliseconds,
-    // 上下文占用只看最后一次请求，usage 是多步累计值
-    contextTokens = usage?.let { it.promptTokens + it.completionTokens } ?: stepBase.contextTokens,
+    // 上下文占用只看最后一次请求，usage 是多步累计值；本步没返回 usage 时沿用之前步骤的
+    lastUsage = usage ?: stepBase.lastUsage,
+    stepCount = (stepBase.stepCount ?: 0) + 1,
 )
 
 private fun now() = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())

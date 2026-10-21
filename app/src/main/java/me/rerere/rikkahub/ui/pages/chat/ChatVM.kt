@@ -28,6 +28,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -206,7 +207,8 @@ class ChatVM(
     // Update checker
     val updateState = settingsStore.settingsFlow
         .map { settings ->
-            !settings.init &&
+            !BuildConfig.IS_PLAY_STORE &&
+                !settings.init &&
                 settings.displaySetting.updateCheckDisabledUntilEpochMillis <= System.currentTimeMillis()
         }
         .distinctUntilChanged()
@@ -241,9 +243,9 @@ class ChatVM(
         }
     }
 
-    fun handleCompressContext(additionalPrompt: String): Job {
+    fun handleCompressContext(additionalPrompt: String, keepRecentMessages: Int): Job {
         return viewModelScope.launch {
-            chatService.compressConversation(_conversationId, additionalPrompt).onFailure {
+            chatService.compressConversation(_conversationId, additionalPrompt, keepRecentMessages).onFailure {
                 chatService.addError(it, title = context.getString(R.string.error_title_compress_conversation))
             }
         }

@@ -26,8 +26,8 @@ android {
         applicationId = "me.rerere.rikkahub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 193
-        versionName = "3.0.0.1"
+        versionCode = 194
+        versionName = "3.1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -98,6 +98,20 @@ android {
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
     }
+    // 按分发渠道区分：github 是 GitHub Release / 每日构建的 APK，play 是上架 Google Play 的 AAB
+    // 两个渠道共用同一个 applicationId，Play 版不能自更新，相关入口通过 BuildConfig.IS_PLAY_STORE 关闭
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("github") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("boolean", "IS_PLAY_STORE", "false")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "IS_PLAY_STORE", "true")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -115,7 +129,6 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            pickFirsts += "lib/*/libtermux.so"
         }
     }
     tasks.withType<KotlinCompile>().configureEach {
@@ -133,6 +146,11 @@ android {
     }
 }
 
+// 两个渠道的启动路径一样，profile 合并到 src/main 共用，不按变体各存一份
+baselineProfile {
+    mergeIntoMain = true
+}
+
 // baselineprofile 插件按 release 复制出 nonMinifiedRelease 时只关掉 isMinifyEnabled，关不掉 optimization，
 // 不手动关的话生成用的包会被 R8 内联、合并类，profile 里记下的是优化后的类和方法
 androidComponents {
@@ -148,8 +166,8 @@ composeCompiler {
 }
 
 tasks.register("buildAll") {
-    dependsOn("assembleRelease", "bundleRelease")
-    description = "Build both APK and AAB"
+    dependsOn("assembleGithubRelease", "bundlePlayRelease")
+    description = "Build GitHub APK and Play AAB"
 }
 
 ksp {
@@ -178,7 +196,10 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.profileinstaller)
-    implementation(libs.termux.terminal.view)
+    implementation(libs.termux.terminal.view) {
+        // terminal-emulator 由仓库内的 :terminal 模块提供, 不再引入上游 aar
+        exclude(group = "com.termux.termux-app", module = "terminal-emulator")
+    }
     implementation(libs.guava.listenablefuture)
 
     // Compose
@@ -322,6 +343,7 @@ dependencies {
     implementation(project(":material3"))
     implementation(project(":ui"))
     implementation(project(":workspace"))
+    implementation(project(":terminal"))
     implementation(project(":oauth"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))

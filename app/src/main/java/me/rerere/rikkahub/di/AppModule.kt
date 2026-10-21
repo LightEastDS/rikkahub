@@ -6,8 +6,8 @@ import com.google.firebase.crashlytics.crashlytics
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.ChatRequestFactory
-import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
+import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
@@ -65,7 +65,7 @@ val appModule = module {
     }
 
     single {
-        WorkspaceTerminalSessionManager(get(), get())
+        WorkspaceTerminalSessionManager(get(), get(), get(), get())
     }
 
     // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；
@@ -95,6 +95,7 @@ val appModule = module {
         ChatRequestFactory(
             context = get(),
             providerManager = get(),
+            usageRecorder = get(),
             chatToolFactory = get(),
             memoryRepository = get(),
             templateTransformer = get(),
