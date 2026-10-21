@@ -26,6 +26,8 @@ data class ConversationConfig(
     val mcpServers: Set<Uuid> = emptySet(),
     val workspaceId: Uuid? = null,
     val enabledSkills: Set<String> = emptySet(),
+    // ST 预设随会话固定，和模型/工具有同样的快照语义
+    val stPresetId: Uuid? = null,
 )
 
 // 内置搜索是模型的开关，不在助手上，由调用方另行填入
@@ -36,6 +38,7 @@ private fun Assistant.toConversationConfig() = ConversationConfig(
     mcpServers = mcpServers,
     workspaceId = workspaceId,
     enabledSkills = enabledSkills,
+    stPresetId = stPresetId,
 )
 
 private fun Assistant.withConversationConfig(config: ConversationConfig) = copy(
@@ -45,6 +48,7 @@ private fun Assistant.withConversationConfig(config: ConversationConfig) = copy(
     mcpServers = config.mcpServers,
     workspaceId = config.workspaceId,
     enabledSkills = config.enabledSkills,
+    stPresetId = config.stPresetId,
 )
 
 /** 会话视角下的助手：会话开始后，会话持有的字段覆盖助手自身的值。 */

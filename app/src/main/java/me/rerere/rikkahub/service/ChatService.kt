@@ -77,6 +77,7 @@ import me.rerere.rikkahub.data.model.withoutConversationFields
 import me.rerere.rikkahub.data.model.withoutUnresumableToolCalls
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
+import me.rerere.rikkahub.data.stpreset.StGenerationType
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import java.net.ConnectException
@@ -619,7 +620,18 @@ class ChatService(
                 else -> Uuid.random()
             }
 
-            val (request, hooks) = requestFactory.createAgent(turn, history, session.processingStatus)
+            val (request, hooks) = requestFactory.createAgent(
+                turn = turn,
+                messages = history,
+                processingStatus = session.processingStatus,
+                generationType = when {
+                    regenerateNodeId != null -> StGenerationType.REGENERATE
+                    history.lastOrNull()?.let { last ->
+                        last.role == MessageRole.ASSISTANT && last.getTools().isEmpty()
+                    } == true -> StGenerationType.CONTINUE
+                    else -> StGenerationType.NORMAL
+                },
+            )
             var finishReason: AgentFinishReason? = null
             try {
                 runAgent(request, hooks).flowOn(Dispatchers.IO).collect { event ->

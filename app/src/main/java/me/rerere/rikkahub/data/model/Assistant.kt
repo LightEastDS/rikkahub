@@ -22,6 +22,10 @@ data class Assistant(
     val useAssistantAvatar: Boolean = false, // 使用助手头像替代模型头像
     val tags: List<Uuid> = emptyList(),
     val systemPrompt: String = "",
+    // ST 预设需要的结构化角色卡字段；旧路径仍然读 systemPrompt
+    val characterCard: CharacterCard? = null,
+    // 绑定的 SillyTavern 预设；非空时聊天请求走 StPromptAssembler
+    val stPresetId: Uuid? = null,
     val temperature: Float? = null,
     val topP: Float? = null,
     // 上下文消息条数上限, 超出后阶梯式截断; 0 表示不限制

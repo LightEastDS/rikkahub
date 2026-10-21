@@ -55,6 +55,7 @@ val viewModelModule = module {
             filesManager = get(),
             skillManager = get(),
             workspaceRepository = get(),
+            stPresetRepository = get(),
         )
     }
     viewModel<MemoryFileVM> {

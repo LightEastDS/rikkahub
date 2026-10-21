@@ -133,6 +133,8 @@ enum class ConversationSortOrder {
 data class DisplaySetting(
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
+    // ST 的 personaDescription marker / {{persona}} 宏
+    val userPersona: String = "",
     val showUserAvatar: Boolean = true,
     val showAssistantBubble: Boolean = false,
     val bubbleOpacity: Float = 1.0f,

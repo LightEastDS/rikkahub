@@ -9,6 +9,7 @@ import me.rerere.ai.agent.RetryPolicy
 import me.rerere.ai.agent.StepRequest
 import me.rerere.ai.agent.withRetry
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
@@ -43,7 +44,17 @@ import me.rerere.rikkahub.data.model.MemoryFile
 import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.repository.StPresetRepository
+import me.rerere.rikkahub.data.repository.StVariableRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.stpreset.StAssemblyReport
+import me.rerere.rikkahub.data.stpreset.StGenerationType
+import me.rerere.rikkahub.data.stpreset.StMacroContext
+import me.rerere.rikkahub.data.stpreset.StMacroResolver
+import me.rerere.rikkahub.data.stpreset.StPreset
+import me.rerere.rikkahub.data.stpreset.StPromptAssembler
+import me.rerere.rikkahub.data.stpreset.StRegexPipeline
+import me.rerere.rikkahub.data.stpreset.StWorldInfoEngine
 import me.rerere.rikkahub.data.repository.memoryId
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
@@ -66,6 +77,8 @@ class ChatTurnContext(
     val workspaceCwd: String?,
     val memories: List<MemoryFile>,
     val tools: List<Tool>,
+    /** 非空时聊天请求走 ST 预设组装器；为 null 时完全沿用旧路径。 */
+    val stPreset: StPreset? = null,
 )
 
 /** 把会话变成发给模型的请求：系统提示词、上下文裁剪、输入输出转换都在这里 */
@@ -75,8 +88,10 @@ class ChatRequestFactory(
     private val usageRecorder: UsageRecorder,
     private val chatToolFactory: ChatToolFactory,
     private val memoryRepository: MemoryRepository,
-    templateTransformer: TemplateTransformer,
-    workspaceRepository: WorkspaceRepository,
+    private val templateTransformer: TemplateTransformer,
+    private val workspaceRepository: WorkspaceRepository,
+    private val stPresetRepository: StPresetRepository,
+    private val stVariableRepository: StVariableRepository,
 ) {
     private val inputTransformers: List<InputMessageTransformer> = listOf(
         TimeReminderTransformer,
@@ -88,8 +103,16 @@ class ChatRequestFactory(
         WorkspaceReminderTransformer(workspaceRepository),
     )
 
-    private val outputTransformers: List<OutputMessageTransformer> = listOf(
-        ThinkTagTransformer,
+    // ST 预设模式下只保留内容级转换：PromptInjection/Placeholder 由组装器接管
+    private val presetHistoryTransformers: List<InputMessageTransformer> = listOf(
+        TimeReminderTransformer,
+        DocumentAsPromptTransformer,
+        OcrTransformer,
+        templateTransformer,
+        WorkspaceReminderTransformer(workspaceRepository),
+    )
+
+    private val outputTransformers: List<OutputMessageTransformer> = listOf(        ThinkTagTransformer,
         Base64ImageToLocalFileTransformer,
         RegexOutputTransformer,
     )
@@ -101,6 +124,14 @@ class ChatRequestFactory(
         val model = settings.getChatModelOf(conversation)
             ?: throw IllegalStateException("No chat model selected")
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
+        val stPreset = assistant.stPresetId?.let { presetId ->
+            runCatching { stPresetRepository.getRecord(presetId) }.getOrNull()
+                ?.takeIf { it.enabled }
+                ?.preset
+        }
+        if (assistant.stPresetId != null && stPreset == null) {
+            Log.w(TAG, "ST preset ${assistant.stPresetId} is missing or disabled; falling back to legacy prompts")
+        }
         return ChatTurnContext(
             settings = settings,
             assistant = assistant,
@@ -116,6 +147,7 @@ class ChatRequestFactory(
                 model = model,
                 workspaceCwd = conversation.workspaceCwd,
             ),
+            stPreset = stPreset,
         )
     }
 
@@ -127,6 +159,7 @@ class ChatRequestFactory(
         turn: ChatTurnContext,
         messages: List<UIMessage>,
         processingStatus: MutableStateFlow<String?>,
+        generationType: StGenerationType = StGenerationType.NORMAL,
     ): Pair<AgentRequest, AgentHooks> {
         val request = AgentRequest(
             provider = usageRecorder.wrap(
@@ -142,7 +175,7 @@ class ChatRequestFactory(
         val hooks = object : AgentHooks {
             override suspend fun prepareStep(messages: List<UIMessage>): StepRequest {
                 Log.i(TAG, "prepareStep: ${turn.model.id}")
-                return buildStep(turn, messages, processingStatus)
+                return buildStep(turn, messages, processingStatus, generationType)
             }
 
             override suspend fun previewStep(message: UIMessage, newPartsFrom: Int) =
@@ -198,8 +231,13 @@ class ChatRequestFactory(
         turn: ChatTurnContext,
         messages: List<UIMessage>,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
+        generationType: StGenerationType = StGenerationType.NORMAL,
     ): StepRequest {
         val assistant = turn.assistant
+        val preset = turn.stPreset
+        if (preset != null) {
+            return buildPresetStep(turn, preset, messages, processingStatus, generationType)
+        }
         val requestMessages = buildList {
             val system = buildString {
                 val effectiveSystemPrompt =
@@ -254,6 +292,153 @@ class ChatRequestFactory(
             sessionId = turn.conversationId.toString(),
         )
         return StepRequest(requestMessages, params)
+    }
+
+    /**
+     * ST 预设路径。
+     *
+     * 历史先走内容级转换，再用预设 Regex 做历史压缩，最后交给组装器插入 marker / relative / in-chat 提示。
+     * ModeInjection 与 Lorebook 不再由 PromptInjectionTransformer 注入，避免重复。
+     */
+    private suspend fun buildPresetStep(
+        turn: ChatTurnContext,
+        preset: StPreset,
+        messages: List<UIMessage>,
+        processingStatus: MutableStateFlow<String?>,
+        generationType: StGenerationType,
+    ): StepRequest {
+        val assistant = turn.assistant
+        val history = messages.limitContext(assistant.contextMessageLimit)
+            .transforms(
+                transformers = presetHistoryTransformers,
+                context = context,
+                model = turn.model,
+                assistant = assistant,
+                settings = turn.settings,
+                processingStatus = processingStatus,
+                workspaceCwd = turn.workspaceCwd,
+            )
+
+        val scopeId = turn.conversationId.toString()
+        val variables = stVariableRepository.load(scopeId)
+        val globalVariables = stVariableRepository.loadGlobal()
+        val character = assistant.characterCard
+        val personaName = turn.settings.displaySetting.userNickname
+        val personaDescription = turn.settings.displaySetting.userPersona
+        val macroContext = StMacroContext(
+            characterName = character?.name.orEmpty(),
+            userName = personaName,
+            personaDescription = personaDescription,
+            description = character?.description.orEmpty(),
+            personality = character?.personality.orEmpty(),
+            scenario = character?.scenario.orEmpty(),
+            mesExample = character?.mesExample.orEmpty(),
+            modelName = turn.model.displayName,
+            input = history.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty(),
+            lastMessage = history.lastOrNull()?.toText().orEmpty(),
+        )
+        val regexMacroResolver = StMacroResolver(variables, globalVariables)
+        val regexResult = StRegexPipeline.applyToMessages(
+            messages = history,
+            scripts = preset.regexScripts,
+            substitute = { regexMacroResolver.render(it, macroContext) },
+        )
+
+        val worldInfo = StWorldInfoEngine.collect(
+            characterBook = preset.characterBook ?: character?.characterBook,
+            lorebooks = turn.settings.lorebooks.filter { it.id in assistant.lorebookIds },
+            messages = regexResult.messages,
+        )
+        // Claude / Gemini / OpenAI Responses 只读取第一条 system，其余 system message 会被 provider 丢掉
+        val flattenSystemMessages = when (val provider = turn.providerSetting) {
+            is ProviderSetting.Claude -> true
+            is ProviderSetting.Google -> true
+            is ProviderSetting.OpenAI -> provider.useResponseApi
+            else -> false
+        }
+
+        val extraSystem = buildString {
+            if (assistant.enableMemory) {
+                append(buildMemoryPrompt(turn.memories))
+            }
+            turn.tools.forEach { tool ->
+                if (isNotEmpty()) appendLine()
+                append(tool.systemPrompt(turn.model, regexResult.messages.filter { !it.isHidden }))
+            }
+            // 预设没有启用 main marker 时不能把助手的 system prompt 弄丢
+            if (!preset.hasEnabledMarker("main") && assistant.systemPrompt.isNotBlank()) {
+                if (isNotEmpty()) appendLine()
+                append(assistant.systemPrompt)
+            }
+            // 没有 worldInfo marker 时把世界书放在 system 里，避免绑定了 Lorebook 却完全不生效
+            if (!preset.hasEnabledMarker("worldInfoBefore") && worldInfo.before.isNotBlank()) {
+                if (isNotEmpty()) appendLine()
+                append(regexMacroResolver.render(worldInfo.before, macroContext))
+            }
+            if (!preset.hasEnabledMarker("worldInfoAfter") && worldInfo.after.isNotBlank()) {
+                if (isNotEmpty()) appendLine()
+                append(regexMacroResolver.render(worldInfo.after, macroContext))
+            }
+        }
+
+        val assembly = StPromptAssembler.assemble(
+            preset = preset,
+            history = regexResult.messages,
+            character = character,
+            assistantSystemPrompt = assistant.systemPrompt,
+            personaName = personaName,
+            personaDescription = personaDescription,
+            modelName = turn.model.displayName,
+            generationType = generationType,
+            extraSystemPrompt = extraSystem,
+            worldInfo = worldInfo,
+            variables = variables,
+            globalVariables = globalVariables,
+            flattenSystemMessages = flattenSystemMessages,
+        )
+        logAssemblyReport(preset, assembly.report)
+
+        // setvar/getvar 在组装过程中可能修改变量，组装完统一持久化
+        stVariableRepository.save(scopeId, variables)
+        stVariableRepository.saveGlobal(globalVariables)
+
+        val params = TextGenerationParams(
+            model = turn.model,
+            temperature = assistant.temperature ?: preset.settings.temperature,
+            topP = assistant.topP ?: preset.settings.topP,
+            maxTokens = assistant.maxTokens ?: preset.settings.maxTokens,
+            tools = turn.tools,
+            reasoningLevel = assistant.reasoningLevel,
+            customHeaders = buildList {
+                addAll(assistant.customHeaders)
+                addAll(turn.model.customHeaders)
+            },
+            customBody = buildList {
+                addAll(assistant.customBodies)
+                addAll(turn.model.customBodies)
+            },
+            sessionId = turn.conversationId.toString(),
+        )
+        return StepRequest(assembly.messages, params)
+    }
+
+    private fun logAssemblyReport(preset: StPreset, report: StAssemblyReport) {
+        Log.i(
+            TAG,
+            "ST preset ${preset.name}: ${report.renderedPrompts} prompts, " +
+                "${report.inChatCount} in-chat, ${report.finalMessageCount} messages, " +
+                "warnings=${report.warnings.size}"
+        )
+        report.warnings.take(10).forEach { Log.w(TAG, "ST preset: $it") }
+    }
+}
+
+private fun StPreset.hasEnabledMarker(identifier: String): Boolean {
+    val marker = prompts.firstOrNull { it.identifier == identifier } ?: return false
+    val hasOrder = promptOrder.any { it.order.isNotEmpty() }
+    if (!hasOrder) return true
+    return promptOrder.any { bucket ->
+        bucket.order.any { entry -> entry.enabled && entry.identifier == marker.identifier }
     }
 }
 

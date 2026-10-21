@@ -213,8 +213,7 @@ internal fun AssistantBasicContent(
                 },
                 supportingContent = { Text(stringResource(R.string.assistant_page_use_assistant_avatar_desc)) },
                 headlineContent = { Text(stringResource(R.string.assistant_page_use_assistant_avatar)) },
-            )
-        }
+            )        }
 
         CardGroup {
             formItem(

@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.pages.extensions
 
 import androidx.annotation.StringRes
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -65,21 +68,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Book01
+import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Download01
+import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.FileDownload
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.MagicWand01
@@ -90,8 +100,14 @@ import me.rerere.rikkahub.data.export.ModeInjectionSerializer
 import me.rerere.rikkahub.ui.hooks.rememberExporter
 import me.rerere.rikkahub.ui.hooks.rememberImporter
 import me.rerere.rikkahub.data.model.InjectionPosition
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.data.repository.StPresetRecord
+import me.rerere.rikkahub.data.stpreset.StPromptAssembler
+import me.rerere.rikkahub.data.stpreset.StPromptRow
+import me.rerere.rikkahub.data.stpreset.StPresetMarkers
+import me.rerere.rikkahub.data.stpreset.StPresetParser
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroupIcon
@@ -116,13 +132,15 @@ import me.rerere.ui.components.Select
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import kotlin.uuid.Uuid
 
 private enum class PromptTab(
     override val icon: ImageVector,
     @param:StringRes private val labelRes: Int,
 ) : PagerTab {
     MODE_INJECTIONS(HugeIcons.MagicWand01, R.string.prompt_page_mode_injection_tab),
-    LOREBOOKS(HugeIcons.Book01, R.string.prompt_page_lorebook_tab);
+    LOREBOOKS(HugeIcons.Book01, R.string.prompt_page_lorebook_tab),
+    ST_PRESETS(HugeIcons.Book02, R.string.prompt_page_st_presets_tab);
 
     override val label: String
         @Composable get() = stringResource(labelRes)
@@ -131,6 +149,7 @@ private enum class PromptTab(
 @Composable
 fun PromptPage(vm: PromptVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val stPresetRecords by vm.stPresetRecords.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState { PromptTab.entries.size }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -173,6 +192,14 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                     PromptTab.LOREBOOKS -> LorebookTab(
                         lorebooks = settings.lorebooks,
                         onUpdate = { vm.updateSettings { latest -> latest.copy(lorebooks = it) } }
+                    )
+
+                    PromptTab.ST_PRESETS -> StPresetTab(
+                        vm = vm,
+                        records = stPresetRecords,
+                        assistants = settings.assistants,
+                        personaName = settings.displaySetting.userNickname,
+                        userPersona = settings.displaySetting.userPersona,
                     )
                 }
             }
@@ -1203,5 +1230,727 @@ private fun RegexInjectionEditDialog(
                 Text(stringResource(R.string.prompt_page_cancel))
             }
         }
+    )
+}
+
+// ==================== ST Preset Tab ====================
+
+@Composable
+private fun StPresetTab(
+    vm: PromptVM,
+    records: List<StPresetRecord>,
+    assistants: List<Assistant>,
+    personaName: String,
+    userPersona: String,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val toaster = LocalToaster.current
+    var detailId by remember { mutableStateOf<Uuid?>(null) }
+    var deleting by remember { mutableStateOf<StPresetRecord?>(null) }
+    var importing by remember { mutableStateOf(false) }
+    var pendingExport by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val payload = pendingExport
+        pendingExport = null
+        if (uri == null || payload == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(payload.second.toByteArray())
+                    } ?: error("cannot open output stream")
+                }
+            }
+            result.onSuccess {
+                toaster.show(context.getString(R.string.prompt_page_st_preset_export_success))
+            }.onFailure {
+                toaster.show(it.message ?: context.getString(R.string.prompt_page_st_preset_export_failed))
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            importing = true
+            try {
+                val (raw, name) = withContext(Dispatchers.IO) {
+                    val displayName = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (index >= 0) cursor.getString(index) else null
+                        } else null
+                    }
+                    val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: error("cannot read selected file")
+                    text to (displayName?.substringBeforeLast('.') ?: "SillyTavern Preset")
+                }
+                val report = vm.importStPreset(raw, name)
+                toaster.show(
+                    context.getString(
+                        R.string.prompt_page_st_preset_import_success,
+                        report.promptDefinitions,
+                        report.enabledEntries,
+                    )
+                )
+            } catch (e: Exception) {
+                toaster.show(e.message ?: context.getString(R.string.export_import_failed))
+            } finally {
+                importing = false
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 128.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = CustomColors.listItemColors.containerColor
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.prompt_page_st_preset_persona),
+                            style = MaterialTheme.typography.titleSmallEmphasized,
+                        )
+                        Text(
+                            text = stringResource(R.string.prompt_page_st_preset_persona_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedTextField(
+                            value = userPersona,
+                            onValueChange = { value ->
+                                vm.updateSettings { settings ->
+                                    settings.copy(displaySetting = settings.displaySetting.copy(userPersona = value))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2,
+                        )
+                    }
+                }
+            }
+
+            if (records.isEmpty()) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().height(420.dp)) {
+                        ExtensionEmptyState(
+                            message = stringResource(R.string.prompt_page_st_presets_empty),
+                            description = stringResource(R.string.prompt_page_st_presets_empty_hint),
+                            icon = HugeIcons.Book02,
+                        )
+                    }
+                }
+            } else {
+                items(records, key = { it.preset.id.toString() }) { record ->
+                    StPresetCard(
+                        record = record,
+                        onOpen = { detailId = record.preset.id },
+                        onToggle = { vm.setStPresetEnabled(record.preset.id, it) },
+                        onExport = {
+                            scope.launch {
+                                val raw = vm.stPresetRawJson(record.preset.id) ?: return@launch
+                                pendingExport = record.preset.name.ifBlank { "st-preset" } to raw
+                                exportLauncher.launch("${record.preset.name.ifBlank { "st-preset" }}.json")
+                            }
+                        },
+                        onDelete = { deleting = record },
+                    )
+                }
+            }
+        }
+
+        HorizontalFloatingToolbar(
+            expanded = true,
+            colors = CustomColors.floatingToolbarColors,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .offset(y = -ScreenOffset),
+            leadingContent = {
+                IconButton(
+                    onClick = { importLauncher.launch(arrayOf("*/*")) },
+                    enabled = !importing,
+                ) {
+                    Icon(HugeIcons.FileImport, null)
+                }
+            },
+        ) {
+            Button(
+                onClick = { importLauncher.launch(arrayOf("*/*")) },
+                enabled = !importing,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(HugeIcons.Add01, null)
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text(
+                        if (importing) stringResource(R.string.assistant_importer_importing)
+                        else stringResource(R.string.prompt_page_st_preset_import)
+                    )
+                }
+            }
+        }
+    }
+
+    deleting?.let { record ->
+        RikkaConfirmDialog(
+            show = true,
+            title = stringResource(R.string.confirm_delete),
+            confirmText = stringResource(R.string.delete),
+            dismissText = stringResource(R.string.cancel),
+            onConfirm = {
+                vm.deleteStPreset(record.preset.id)
+                deleting = null
+            },
+            onDismiss = { deleting = null },
+        ) {
+            Text(stringResource(R.string.common_delete_confirm_message, record.preset.name))
+        }
+    }
+
+    records.firstOrNull { it.preset.id == detailId }?.let { record ->
+        ModalBottomSheet(onDismissRequest = { detailId = null }) {
+            StPresetDetailContent(
+                record = record,
+                assistants = assistants,
+                personaName = personaName,
+                userPersona = userPersona,
+                onTogglePrompt = { orderIndex, enabled ->
+                    vm.setStPromptEnabled(record.preset.id, orderIndex, enabled)
+                },
+                onMovePrompt = { orderIndex, delta ->
+                    vm.moveStPrompt(record.preset.id, orderIndex, delta)
+                },
+                onResetPreset = { vm.resetStPreset(record.preset.id) },
+                onUpdatePrompt = { identifier, name, role, content ->
+                    vm.updateStPrompt(record.preset.id, identifier, name, content, role)
+                },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StPresetCard(
+    record: StPresetRecord,
+    onOpen: () -> Unit,
+    onToggle: (Boolean) -> Unit,
+    onExport: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val preset = record.preset
+    val enabledEntries = preset.promptOrder.sumOf { bucket -> bucket.order.count { it.enabled } }
+    Card(
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CardGroupIcon(
+                    icon = HugeIcons.Book02,
+                    containerColor = if (record.enabled) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHighest
+                    },
+                    contentColor = if (record.enabled) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                Text(
+                    text = preset.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
+                    style = MaterialTheme.typography.titleMediumEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = record.enabled, onCheckedChange = onToggle)
+                ItemActionMenu(
+                    actions = listOf(
+                        ItemAction(
+                            text = stringResource(R.string.export_title),
+                            icon = HugeIcons.Share03,
+                            onClick = onExport,
+                        ),
+                        ItemAction(
+                            text = stringResource(R.string.prompt_page_delete),
+                            icon = HugeIcons.Delete01,
+                            destructive = true,
+                            onClick = onDelete,
+                        ),
+                    )
+                )
+            }
+            FlowRow(
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Tag(type = TagType.INFO) {
+                    Text(stringResource(R.string.prompt_page_st_preset_prompt_count, preset.prompts.size))
+                }
+                Tag(type = TagType.DEFAULT) {
+                    Text(stringResource(R.string.prompt_page_st_preset_enabled_count, enabledEntries))
+                }
+                if (record.hasCustomOrder) {
+                    Tag(type = TagType.WARNING) {
+                        Text(stringResource(R.string.prompt_page_st_preset_custom_order))
+                    }
+                } else if (record.isModified) {
+                    Tag(type = TagType.WARNING) {
+                        Text(stringResource(R.string.prompt_page_st_preset_modified))
+                    }
+                }
+                if (!record.enabled) {
+                    Tag(type = TagType.WARNING) {
+                        Text(stringResource(R.string.prompt_page_st_preset_disabled))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StPresetDetailContent(
+    record: StPresetRecord,
+    assistants: List<Assistant>,
+    personaName: String,
+    userPersona: String,
+    onTogglePrompt: (orderIndex: Int, enabled: Boolean) -> Unit,
+    onMovePrompt: (orderIndex: Int, delta: Int) -> Unit,
+    onResetPreset: () -> Unit,
+    onUpdatePrompt: (identifier: String, name: String, role: MessageRole, content: String) -> Unit,
+) {
+    val preset = record.preset
+    val rows = remember(preset) { StPromptAssembler.editablePrompts(preset) }
+    val mountedRows = rows.filter { it.orderIndex != null }
+    val detachedRows = rows.filter { it.orderIndex == null }
+    var showInspect by remember { mutableStateOf(false) }
+    var editingRow by remember { mutableStateOf<StPromptRow?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.92f)
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = preset.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Text(
+            text = stringResource(
+                R.string.prompt_page_st_preset_summary,
+                preset.prompts.size,
+                preset.promptOrder.sumOf { it.order.size },
+                preset.regexScripts.size,
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.prompt_page_st_preset_copy_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Button(
+                onClick = { showInspect = true },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.prompt_page_st_preset_inspect))
+            }
+            if (record.isModified) {
+                TextButton(onClick = onResetPreset) {
+                    Text(stringResource(R.string.prompt_page_st_preset_restore_default))
+                }
+            }
+        }
+        Text(
+            text = stringResource(R.string.prompt_page_st_preset_inspect_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (preset.warnings.isNotEmpty()) {
+            Text(
+                text = stringResource(R.string.prompt_page_st_preset_warnings),
+                style = MaterialTheme.typography.titleSmallEmphasized,
+            )
+            preset.warnings.take(6).forEach { warning ->
+                Text(
+                    text = "• $warning",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        Text(
+            text = stringResource(R.string.prompt_page_st_preset_order),
+            style = MaterialTheme.typography.titleSmallEmphasized,
+        )
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(bottom = 12.dp),
+        ) {
+            items(mountedRows, key = { "${it.prompt.identifier}:${it.orderIndex}" }) { row ->
+                StPromptEditRow(
+                    row = row,
+                    canMoveUp = (row.orderIndex ?: 0) > 0,
+                    canMoveDown = (row.orderIndex ?: 0) < mountedRows.lastIndex,
+                    onToggle = { enabled -> row.orderIndex?.let { onTogglePrompt(it, enabled) } },
+                    onMoveUp = { row.orderIndex?.let { onMovePrompt(it, -1) } },
+                    onMoveDown = { row.orderIndex?.let { onMovePrompt(it, 1) } },
+                    onEdit = { editingRow = row },
+                )
+            }
+            if (detachedRows.isNotEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.prompt_page_st_preset_detached),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                items(detachedRows, key = { "detached:${it.prompt.identifier}" }) { row ->
+                    StPromptEditRow(
+                        row = row,
+                        canMoveUp = false,
+                        canMoveDown = false,
+                        onToggle = {},
+                        onMoveUp = {},
+                        onMoveDown = {},
+                        onEdit = { editingRow = row },
+                    )
+                }
+            }
+            if (preset.regexScripts.isNotEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.prompt_page_st_preset_regex),
+                        style = MaterialTheme.typography.titleSmallEmphasized,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                items(preset.regexScripts) { script ->
+                    Text(
+                        text = buildString {
+                            append(script.name.ifBlank { script.findRegex.take(40) })
+                            append(" · ")
+                            append(if (script.isDisplayScript) "display" else "prompt")
+                            append(" · placement ")
+                            append(script.placement.joinToString(",").ifBlank { "?" })
+                            if (script.disabled) append(" · disabled")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showInspect) {
+        val boundAssistant = remember(assistants, preset) {
+            assistants.firstOrNull { it.stPresetId == preset.id }
+        }
+        val assembly = remember(preset, boundAssistant, personaName, userPersona) {
+            StPromptAssembler.assemble(
+                preset = preset,
+                history = listOf(
+                    UIMessage.user("（预览）你好。"),
+                    UIMessage.assistant("（预览）你好，我是${boundAssistant?.characterCard?.name ?: "角色"}。"),
+                ),
+                character = boundAssistant?.characterCard,
+                assistantSystemPrompt = boundAssistant?.systemPrompt.orEmpty(),
+                personaName = personaName,
+                personaDescription = userPersona,
+                modelName = "preview",
+            )
+        }
+        AlertDialog(
+            onDismissRequest = { showInspect = false },
+            title = { Text(stringResource(R.string.prompt_page_st_preset_inspect)) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.prompt_page_st_preset_inspect_summary,
+                            assembly.report.renderedPrompts,
+                            assembly.messages.size,
+                            assembly.report.warnings.size,
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    if (assembly.messages.isEmpty()) {
+                        Text(stringResource(R.string.prompt_page_st_preset_inspect_empty))
+                    }
+                    assembly.messages.forEachIndexed { index, message ->
+                        Text(
+                            text = "${index + 1}. ${message.role.name}: ${message.toText().take(300)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    assembly.report.warnings.forEach { warning ->
+                        Text(
+                            text = "⚠ $warning",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showInspect = false }) {
+                    Text(stringResource(R.string.prompt_page_st_preset_close))
+                }
+            },
+        )
+    }
+
+    editingRow?.let { row ->
+        StPromptEditDialog(
+            row = row,
+            onDismiss = { editingRow = null },
+            onSave = { name, role, content ->
+                onUpdatePrompt(row.prompt.identifier, name, role, content)
+                editingRow = null
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StPromptEditRow(
+    row: StPromptRow,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    val prompt = row.prompt
+    val protected = prompt.marker && StPresetMarkers.isProtected(prompt.identifier)
+    val notApplicable = row.orderIndex == null ||
+        (prompt.marker && prompt.identifier !in StPresetParser.KNOWN_MARKERS) ||
+        (!prompt.marker && prompt.content.isBlank())
+    val status = when {
+        notApplicable -> stringResource(R.string.prompt_page_st_preset_status_na)
+        protected || row.enabled -> stringResource(R.string.prompt_page_st_preset_status_active)
+        else -> stringResource(R.string.prompt_page_st_preset_status_disabled)
+    }
+    val statusType = when {
+        notApplicable -> TagType.WARNING
+        protected || row.enabled -> TagType.SUCCESS
+        else -> TagType.ERROR
+    }
+    Surface(
+        onClick = onEdit,
+        shape = RoundedCornerShape(14.dp),
+        color = if ((row.enabled || protected) && !notApplicable) {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "${row.orderIndex?.plus(1) ?: "—"}. ${prompt.name.ifBlank { prompt.identifier }}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = HugeIcons.Edit01,
+                        contentDescription = stringResource(R.string.prompt_page_st_preset_edit),
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Tag(type = TagType.DEFAULT) { Text(prompt.role.name.lowercase()) }
+                    if (prompt.marker) {
+                        Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_marker)) }
+                    } else if (prompt.isInChat) {
+                        Tag(type = TagType.WARNING) {
+                            Text(stringResource(R.string.prompt_page_st_preset_in_chat_depth, prompt.injectionDepth))
+                        }
+                    } else {
+                        Tag(type = TagType.DEFAULT) { Text(stringResource(R.string.prompt_page_st_preset_relative)) }
+                    }
+                    if (protected) {
+                        Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_protected)) }
+                    }
+                    Tag(type = statusType) { Text(status) }
+                    Text(
+                        text = stringResource(R.string.prompt_page_st_preset_chars, prompt.content.length),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (!notApplicable) {
+                Switch(
+                    checked = protected || row.enabled,
+                    onCheckedChange = if (protected) null else onToggle,
+                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconButton(
+                        onClick = onMoveUp,
+                        enabled = canMoveUp,
+                        modifier = Modifier.size(30.dp),
+                    ) {
+                        Icon(HugeIcons.ArrowUp01, stringResource(R.string.prompt_page_st_preset_move_up))
+                    }
+                    IconButton(
+                        onClick = onMoveDown,
+                        enabled = canMoveDown,
+                        modifier = Modifier.size(30.dp),
+                    ) {
+                        Icon(HugeIcons.ArrowDown01, stringResource(R.string.prompt_page_st_preset_move_down))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StPromptEditDialog(
+    row: StPromptRow,
+    onDismiss: () -> Unit,
+    onSave: (name: String, role: MessageRole, content: String) -> Unit,
+) {
+    val prompt = row.prompt
+    var name by remember(prompt.identifier) { mutableStateOf(prompt.name) }
+    var role by remember(prompt.identifier) { mutableStateOf(prompt.role) }
+    var content by remember(prompt.identifier) { mutableStateOf(prompt.content) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.prompt_page_st_preset_edit)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.prompt_page_name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                if (prompt.marker) {
+                    Text(
+                        text = stringResource(R.string.prompt_page_st_preset_marker_readonly),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.prompt_page_injection_role),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Select(
+                        options = listOf(MessageRole.SYSTEM, MessageRole.USER, MessageRole.ASSISTANT),
+                        selectedOption = role,
+                        onOptionSelected = { role = it },
+                        optionToString = { it.name.lowercase() },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = content,
+                        onValueChange = { content = it },
+                        label = { Text(stringResource(R.string.prompt_page_injection_content)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 180.dp),
+                        minLines = 8,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(name.trim(), role, content) }) {
+                Text(stringResource(R.string.prompt_page_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.prompt_page_cancel))
+            }
+        },
     )
 }

@@ -18,6 +18,16 @@
   * 便于长会话场景下快速定位和回溯上下文层级。
 * **实现逻辑**：从聊天流 `ChatList` 递归向下传递当前消息节点的索引，并在 `ChatMessageNerdLine` 中通过消息图标渲染显示。
 
+### 3. SillyTavern 预设兼容 (ST Preset Compatibility)
+* **功能描述**：支持导入 SillyTavern Chat Completion 预设 JSON，并在聊天时按 `prompt_order`、marker、In-Chat depth 组装提示词，而不是把预设硬塞进 ModeInjection。
+* **运行时能力**：`prompt_order[].enabled` 启用状态、relative / in-chat 排序、`injection_trigger`、`chatHistory` 与角色卡 marker、`{{char}}`/`{{getvar}}` 等 ST 宏、会话级变量持久化、`promptOnly` 预设 Regex、`character_book` / Lorebook 世界书 marker、`squash_system_messages`、`assistant_prefill`。
+* **Provider 适配**：Claude / Gemini / OpenAI Responses 只接受一条顶层 system，组装器会自动合并开头 system，并把历史后的 system 降级为 user，避免提示词被 provider 静默丢弃。
+* **UI**：`提示词 → ST 预设` 支持导入、启停、删除、导出原始 JSON、查看 prompt_order / marker / Regex，以及离线组装 Inspect；助手基础设置中可绑定预设。
+* **兼容性**：旧助手（无 `stPresetId`）完全走原路径；预设删除或停用后自动回退 legacy 路径，不会崩溃。
+* **存储**：Room `st_presets` / `st_variables` 表，原始 JSON 原样保留；数据库版本 35。
+* **已知限制**：显示层 Regex、Text Completion 预设、世界书递归 / sticky / 分组竞争、`continue_prefill`、`names_behavior` 暂不支持。
+* **文档**：`docs/ST-PRESET-COMPAT.md`。
+
 ---
 
 ## 二、 纯净化与去商业化改造 (De-commercialization & Clean-up)
@@ -87,6 +97,14 @@
 | `ChatMessageActions.kt` | 功能支持 | 消息操作菜单新增「隐藏/恢复上下文」快捷入口 |
 | `web-ui` 相关组件 | 功能与 UI | 同步支持轮次图标、去掉 `#`、支持 `isHidden` 状态显示与上下文排除 |
 | `Logging.kt` (common 模块) | 配置优化 | 将 HTTP 请求日志中的「记录请求」（`requestLoggingEnabled`）默认开启 |
+| `data/stpreset/*` | 功能新增 | ST 预设模型、解析器、宏引擎、Regex 管线、世界书与 PromptAssembler |
+| `data/db/entity/StPresetEntity.kt` / `data/db/dao/StPresetDao.kt` | 功能新增 | `st_presets`、`st_variables` 表与 DAO；Room 版本 33 |
+| `data/repository/StPresetRepository.kt` | 功能新增 | 预设导入/缓存/启停/删除与变量持久化 |
+| `data/model/Assistant.kt` / `CharacterCard.kt` / `ConversationConfig.kt` | 功能新增 | `stPresetId` 绑定、结构化角色卡、会话级预设快照 |
+| `data/ai/ChatRequestFactory.kt` | 功能新增 | `ST_PRESET` / legacy 双路径，预设模式下接管 system / marker / in-chat |
+| `ui/pages/extensions/PromptPage.kt` / `PromptVM.kt` | UI 新增 | ST 预设 tab：导入、启停、删除、导出、详情与 Inspect |
+| `ui/pages/assistant/detail/AssistantBasicPage.kt` / `AssistantImporter.kt` | UI / 功能 | 预设绑定入口；V2/V3 角色卡结构化字段与 `character_book` |
+| `docs/ST-PRESET-COMPAT.md` | 文档 | 支持范围、使用方式、限制与测试说明 |
 
 ---
 
@@ -113,4 +131,8 @@
      - 将楼层轮次指示（往复图标与无 `#` 数字）、隐藏状态标识（`ViewOff`）以及字数统计无缝融入新版技术状态栏中；
      - 彻底清除上游新增的商业中转站推荐（钠API）及相关图标正则匹配规则；
      - 保留独立发布签名与国内 Maven 源加速。
+* **v3.1.0.1.1**：新增 SillyTavern Chat Completion 预设兼容（导入、prompt_order / marker / In-Chat depth 组装、ST 宏与会话变量、prompt-only Regex、character_book / Lorebook 世界书、系统消息 provider 适配）；新增 `提示词 → ST 预设` 管理页与助手预设绑定；数据库升级到 33；版本号 `3.1.0.1.1`（versionCode 195）。
+* **v3.1.0.1.2**：ST 预设详情支持逐条启用/停用、上移/下移排序、恢复默认排序；未挂载/未知 marker/空内容条目标注「不适用」；调整预设卡片和详情列表布局，修复标签换行与操作区错位；数据库升级到 34；版本号 `3.1.0.1.2`（versionCode 196）。
+* **v3.1.0.1.3**：ST 预设导入时自动保存可编辑副本（原始 JSON 单独保留，可恢复默认）；条目支持点开查看/修改名称、角色、正文；`main` / `worldInfoBefore` / `worldInfoAfter` / `chatHistory` 等核心 marker 禁止停用，同时保留缺失 marker 的兜底；ST 预设改为在「助手 → 拓展管理」中启用，导入本身不启用；不使用预设的助手继续走原 ModeInjection / Lorebook 路径；数据库升级到 35；版本号 `3.1.0.1.3`（versionCode 197）。
+* **v3.1.0.2**：正式发布 ST 预设兼容（导入、副本编辑、prompt_order / marker / In-Chat depth 组装、ST 宏与会话变量、prompt-only Regex、character_book / Lorebook 世界书、provider system 适配）；新增「提示词 → ST 预设」与助手拓展管理入口；默认开启 HTTP 请求日志；数据库版本 35；版本号 `3.1.0.2`（versionCode 198）。
 

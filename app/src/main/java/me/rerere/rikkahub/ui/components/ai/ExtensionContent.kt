@@ -43,6 +43,7 @@ import me.rerere.rikkahub.data.skills.SkillMetadata
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.data.repository.StPresetRecord
 
 @Composable
 fun ModeInjectionsContent(
@@ -64,6 +65,39 @@ fun ModeInjectionsContent(
             title = injection.name.ifBlank { stringResource(R.string.extension_content_unnamed) },
             checked = selectedIds.contains(injection.id),
             onCheckedChange = { checked -> onToggle(injection.id, checked) },
+            shapes = shapes,
+            colors = colors,
+        )
+    }
+}
+
+@Composable
+fun StPresetsContent(
+    presets: List<StPresetRecord>,
+    selectedId: Uuid?,
+    onToggle: (Uuid, Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    colors: ListItemColors = ListItemDefaults.segmentedColors(),
+    onManage: (() -> Unit)? = null,
+) {
+    ExtensionList(
+        items = presets,
+        modifier = modifier,
+        contentPadding = contentPadding,
+        onManage = onManage,
+        key = { it.preset.id },
+    ) { record, shapes ->
+        val promptCount = stringResource(R.string.prompt_page_st_preset_prompt_count, record.preset.prompts.size)
+        val enabledCount = stringResource(
+            R.string.prompt_page_st_preset_enabled_count,
+            record.preset.promptOrder.sumOf { bucket -> bucket.order.count { it.enabled } },
+        )
+        ExtensionListItem(
+            title = record.preset.name.ifBlank { stringResource(R.string.extension_content_unnamed) },
+            description = "$promptCount · $enabledCount",
+            checked = selectedId == record.preset.id,
+            onCheckedChange = { checked -> onToggle(record.preset.id, checked) },
             shapes = shapes,
             colors = colors,
         )

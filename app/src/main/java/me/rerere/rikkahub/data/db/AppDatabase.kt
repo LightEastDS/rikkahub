@@ -16,6 +16,8 @@ import me.rerere.rikkahub.data.db.dao.MemoryConsolidationDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.dao.TranslationHistoryDAO
+import me.rerere.rikkahub.data.db.dao.StPresetDao
+import me.rerere.rikkahub.data.db.dao.StVariableDao
 import me.rerere.rikkahub.data.db.dao.UsageRecordDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
@@ -29,6 +31,8 @@ import me.rerere.rikkahub.data.db.entity.MediaCreationSessionEntity
 import me.rerere.rikkahub.data.db.entity.MemoryConsolidationEntity
 import me.rerere.rikkahub.data.db.entity.MemoryFileEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.StPresetEntity
+import me.rerere.rikkahub.data.db.entity.StVariableEntity
 import me.rerere.rikkahub.data.db.entity.TranslationHistoryEntity
 import me.rerere.rikkahub.data.db.entity.UsageRecordEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
@@ -54,8 +58,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         MediaCreationRecordEntity::class,
         TranslationHistoryEntity::class,
         UsageRecordEntity::class,
+        StPresetEntity::class,
+        StVariableEntity::class,
     ],
-    version = 32,
+    version = 35,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -81,6 +87,8 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 28, to = 29, spec = Migration_28_29::class),
         AutoMigration(from = 29, to = 30),
         AutoMigration(from = 31, to = 32),
+        AutoMigration(from = 32, to = 33),
+        AutoMigration(from = 33, to = 34),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -108,6 +116,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun translationHistoryDao(): TranslationHistoryDAO
 
     abstract fun usageRecordDao(): UsageRecordDAO
+
+    abstract fun stPresetDao(): StPresetDao
+
+    abstract fun stVariableDao(): StVariableDao
 }
 
 object TokenUsageConverter {

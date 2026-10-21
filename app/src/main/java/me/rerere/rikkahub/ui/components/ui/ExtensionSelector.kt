@@ -8,6 +8,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Book01
+import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Zap
@@ -26,11 +28,13 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.skills.SkillManager
 import me.rerere.rikkahub.data.skills.SkillMetadata
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.repository.StPresetRepository
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
 import me.rerere.rikkahub.ui.components.ai.LorebooksContent
 import me.rerere.rikkahub.ui.components.ai.ModeInjectionsContent
 import me.rerere.rikkahub.ui.components.ai.QuickMessagesContent
 import me.rerere.rikkahub.ui.components.ai.SkillsContent
+import me.rerere.rikkahub.ui.components.ai.StPresetsContent
 import org.koin.compose.koinInject
 
 internal enum class ExtensionTab(
@@ -40,7 +44,8 @@ internal enum class ExtensionTab(
     QUICK_MESSAGES(HugeIcons.Zap, R.string.extension_selector_tab_quick_messages),
     MODE_INJECTIONS(HugeIcons.MagicWand01, R.string.extension_selector_tab_mode_injections),
     LOREBOOKS(HugeIcons.Book01, R.string.extension_selector_tab_lorebooks),
-    SKILLS(HugeIcons.Puzzle, R.string.extension_selector_tab_skills);
+    SKILLS(HugeIcons.Puzzle, R.string.extension_selector_tab_skills),
+    ST_PRESETS(HugeIcons.Book02, R.string.extension_selector_tab_st_presets);
 
     override val label: String
         @Composable get() = stringResource(labelRes)
@@ -58,7 +63,9 @@ fun ExtensionSelector(
     onNavigateToSkills: () -> Unit = {},
 ) {
     val skillManager: SkillManager = koinInject()
+    val stPresetRepository: StPresetRepository = koinInject()
     var skills by remember { mutableStateOf<List<SkillMetadata>>(emptyList()) }
+    val stPresets by stPresetRepository.records.collectAsState(initial = emptyList())
 
     LaunchedEffect(Unit) {
         // 打开扩展面板时清理运行时被删除的技能（残留的 enabledSkills 引用），
@@ -180,6 +187,26 @@ fun ExtensionSelector(
                             message = stringResource(R.string.extension_selector_skills_empty),
                             buttonText = stringResource(R.string.extension_selector_go_to_skills),
                             onAction = onNavigateToSkills,
+                            icon = tab.icon,
+                        )
+                    }
+                }
+
+                ExtensionTab.ST_PRESETS -> {
+                    if (stPresets.isNotEmpty()) {
+                        StPresetsContent(
+                            presets = stPresets,
+                            selectedId = assistant.stPresetId,
+                            onToggle = { id, checked ->
+                                onUpdate(assistant.copy(stPresetId = if (checked) id else null))
+                            },
+                            onManage = onNavigateToPrompts,
+                        )
+                    } else {
+                        ExtensionEmptyState(
+                            message = stringResource(R.string.extension_selector_st_presets_empty),
+                            buttonText = stringResource(R.string.extension_selector_go_to_extensions),
+                            onAction = onNavigateToPrompts,
                             icon = tab.icon,
                         )
                     }

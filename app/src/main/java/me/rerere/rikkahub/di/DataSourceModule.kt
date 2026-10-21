@@ -129,6 +129,14 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().stPresetDao()
+    }
+
+    single {
+        get<AppDatabase>().stVariableDao()
+    }
+
+    single {
         UsageRecorder(dao = get(), scope = get<AppScope>())
     }
 

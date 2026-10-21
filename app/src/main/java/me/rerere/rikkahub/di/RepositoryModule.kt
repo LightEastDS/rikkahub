@@ -10,6 +10,8 @@ import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.MediaCreationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.repository.StPresetRepository
+import me.rerere.rikkahub.data.repository.StVariableRepository
 import me.rerere.rikkahub.data.repository.TranslationHistoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.skills.SkillManager
@@ -29,6 +31,14 @@ val repositoryModule = module {
 
     single {
         FolderRepository(get(), get())
+    }
+
+    single {
+        StPresetRepository(get())
+    }
+
+    single {
+        StVariableRepository(get())
     }
 
     single {

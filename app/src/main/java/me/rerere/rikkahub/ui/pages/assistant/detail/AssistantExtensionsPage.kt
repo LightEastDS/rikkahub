@@ -27,6 +27,7 @@ import me.rerere.rikkahub.ui.components.ai.LorebooksContent
 import me.rerere.rikkahub.ui.components.ai.ModeInjectionsContent
 import me.rerere.rikkahub.ui.components.ai.QuickMessagesContent
 import me.rerere.rikkahub.ui.components.ai.SkillsContent
+import me.rerere.rikkahub.ui.components.ai.StPresetsContent
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ExtensionTab
 import me.rerere.rikkahub.ui.components.ui.PagerTabs
@@ -41,6 +42,7 @@ fun AssistantExtensionsPage(id: String) {
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val skills by vm.skills.collectAsStateWithLifecycle()
+    val stPresets by vm.stPresets.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val pagerState = rememberPagerState { ExtensionTab.entries.size }
@@ -173,6 +175,28 @@ fun AssistantExtensionsPage(id: String) {
                                     vm.update(assistant.copy(enabledSkills = newSkills))
                                 },
                                 onManage = { navController.navigate(Screen.Skills) },
+                            )
+                        }
+                    }
+
+                    4 -> {
+                        if (stPresets.isEmpty()) {
+                            ExtensionEmptyState(
+                                message = stringResource(R.string.assistant_extensions_page_empty_st_presets),
+                                buttonText = stringResource(R.string.assistant_extensions_page_goto_prompts),
+                                onAction = { navController.navigate(Screen.Prompts) },
+                                icon = ExtensionTab.ST_PRESETS.icon,
+                            )
+                        } else {
+                            StPresetsContent(
+                                contentPadding = listPadding,
+                                colors = listColors,
+                                presets = stPresets,
+                                selectedId = assistant.stPresetId,
+                                onToggle = { id, checked ->
+                                    vm.update(assistant.copy(stPresetId = if (checked) id else null))
+                                },
+                                onManage = { navController.navigate(Screen.Prompts) },
                             )
                         }
                     }

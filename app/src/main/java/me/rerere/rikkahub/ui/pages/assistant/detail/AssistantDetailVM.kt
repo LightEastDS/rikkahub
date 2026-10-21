@@ -26,6 +26,8 @@ import me.rerere.rikkahub.data.model.MemoryFile
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.repository.StPresetRepository
+import me.rerere.rikkahub.data.repository.StPresetRecord
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import kotlin.uuid.Uuid
 
@@ -39,6 +41,7 @@ class AssistantDetailVM(
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
+    private val stPresetRepository: StPresetRepository,
 ) : ViewModel() {
     private val assistantId = Uuid.parse(id)
 
@@ -100,6 +103,12 @@ class AssistantDetailVM(
         }.stateIn(
             scope = viewModelScope, started = SharingStarted.Eagerly, initialValue = emptyList()
         )
+
+    val stPresets: StateFlow<List<StPresetRecord>> = stPresetRepository.records.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        emptyList(),
+    )
 
     val workspaces: StateFlow<List<WorkspaceEntity>> = workspaceRepository
         .listFlow()
