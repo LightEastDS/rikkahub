@@ -114,7 +114,7 @@ fun ChatMessageNerdLine(
                                 )
                             },
                             content = {
-                                Text(text = "${nodeIndex + 1}")
+                                Text(text = "${nodeIndex + 1}轮")
                             }
                         )
                     }

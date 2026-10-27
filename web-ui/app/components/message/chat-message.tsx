@@ -148,7 +148,7 @@ function getNerdStats(
     stats.push({
       key: "turn",
       icon: <ArrowRightLeft className="size-3" />,
-      label: `${messageIndex + 1}`,
+      label: `${messageIndex + 1}轮`,
     });
   }
 

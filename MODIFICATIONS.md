@@ -93,7 +93,7 @@
 | `AIIconMatcher.kt` | 纯净化 | 移除赞助商图标规则与相关匹配正则 |
 | `Message.kt` (ai 模块) | 功能新增 | `UIMessage` 增加 `isHidden` 字段并在 `limitContext` 中自动过滤被隐藏消息 |
 | `ChatService.kt` | 功能新增 | 增加 `/hide`、`/unhide` 楼层指令拦截与解析执行器，以及切换单条消息隐藏状态 API |
-| `ChatMessageNerdLine.kt` | UI 优化 | 楼层图标升级为双向轮次图标（`ArrowLeftRight`），取消数字前的 `#`，显示隐藏状态 |
+| `ChatMessageNerdLine.kt` | UI 优化 | 楼层图标升级为双向轮次图标（`ArrowLeftRight`），格式为数字+“轮”（如 `1轮`），显示隐藏状态 |
 | `ChatMessageActions.kt` | 功能支持 | 消息操作菜单新增「隐藏/恢复上下文」快捷入口 |
 | `web-ui` 相关组件 | 功能与 UI | 同步支持轮次图标、去掉 `#`、支持 `isHidden` 状态显示与上下文排除 |
 | `Logging.kt` (common 模块) | 配置优化 | 将 HTTP 请求日志中的「记录请求」（`requestLoggingEnabled`）默认开启 |
@@ -149,7 +149,7 @@
      - 新增德语多语言支持。
   2. **定制特性适配与延续**：
      - 解决多语言资源与构建脚本版本冲突，无缝合并 Fork 与上游新增内容；
-     - 完整保留字数统计、消息楼层轮次（往复图标及纯数字）、隐藏楼层上下文排除（`/hide` 指令）；
+     - 完整保留字数统计、隐藏楼层上下文排除（`/hide` 指令），并将楼层轮次格式更新为数字+“轮”（如 `1轮`）；
      - 完整保留 SillyTavern Chat Completion 预设兼容引擎与可视化管理体系；
      - 保持去商业化与纯净化（清空锁定商业赞助商中转与推荐列表）；
      - 保留独立发布签名密钥（`my-release-key.jks`）与阿里云 Maven 镜像加速；
