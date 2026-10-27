@@ -834,7 +834,7 @@
   <string name="setting_page_preferences_theme">Theme</string>
   <string name="setting_page_preferences_theme_desc">Dynamic color, theme, AMOLED dark mode</string>
   <string name="setting_page_preferences_notification">Notifications</string>
-  <string name="setting_page_preferences_notification_desc">Update alerts, message generation notifications</string>
+  <string name="setting_page_preferences_notification_desc">Update alerts, message generation notifications, background floating window</string>
   <string name="setting_page_preferences_general">General</string>
   <string name="setting_page_preferences_general_desc">Interaction behavior, scrolling, input settings</string>
   <string name="setting_page_preferences_ui">UI Preferences</string>
@@ -987,7 +987,6 @@
   <string name="setting_provider_page_response_api_warning">Response API is OpenAI\'s next-generation API. Most providers do not support it. If you don\'t know what this is, don\'t enable it.</string>
   <string name="setting_provider_page_save">Save</string>
   <string name="setting_provider_page_save_success">Save successful</string>
-  <string name="setting_provider_page_scan_error">Error: %s</string>
   <string name="setting_provider_page_scan_qr_code">Scan QR Code</string>
   <string name="setting_provider_page_search_providers">Search providers</string>
   <string name="setting_provider_page_recommend">Recommended providers</string>
@@ -1149,8 +1148,6 @@
   <string name="use_web_search">Web Search</string>
   <string name="user_default_name">User</string>
   <string name="video">Video</string>
-  <string name="web_search_disabled">Web search disabled</string>
-  <string name="web_search_enabled">Web search enabled</string>
   <string name="setting_theme_page_delete_theme_title">Delete Theme</string>
   <string name="setting_theme_page_delete_theme_message">Are you sure you want to delete this theme?</string>
   <string name="skills_page_import_from_file">Import from File</string>
@@ -1524,7 +1521,6 @@
   <string name="setting_page_media">Media</string>
   <string name="setting_page_media_desc">Image and video generation providers, asset upload</string>
   <string name="setting_media_page_providers">Providers</string>
-  <string name="setting_media_page_edit_provider">Edit provider</string>
   <string name="setting_media_page_add_provider">Add provider</string>
   <string name="setting_media_page_empty">No media generation providers yet. Tap + at the top to add one.</string>
   <string name="setting_media_page_s3_desc">Some APIs only accept assets at public URLs (such as reference images and reference videos for video generation). Set up an S3-compatible object storage service here, and local files are uploaded to its bucket first and then passed to the API as temporary URLs; uploaded files are cleaned up automatically after 7 days. This configuration is independent of the S3 used for backups.</string>
@@ -1818,4 +1814,25 @@
   <string name="extension_selector_st_presets_empty">No ST presets imported</string>
   <string name="prompt_page_st_preset_modified">Modified</string>
   <string name="prompt_page_st_preset_copy_hint">You are editing an imported copy. The original preset is kept and can be restored at any time.</string>
+  <string name="setting_page_preferences_notification_background_generation">Background generation</string>
+  <string name="setting_page_preferences_notification_floating_window">Background floating window</string>
+  <string name="setting_page_preferences_notification_floating_window_desc">When you leave the app while the AI is still replying, show a floating icon. Tap it to check progress, confirm tool calls and reply quickly</string>
+  <string name="setting_page_preferences_notification_overlay_permission">Grant overlay permission</string>
+  <string name="setting_page_preferences_notification_overlay_permission_desc">The floating window will not appear without this permission</string>
+  <string name="floating_chat_open_conversation">Open conversation</string>
+  <string name="floating_chat_collapse">Collapse</string>
+  <string name="floating_chat_close">Close floating window</string>
+  <string name="floating_chat_ask_user">The AI has a question for you</string>
+  <string name="floating_chat_tool_request">Wants to call tool: %1$s</string>
+  <string name="floating_chat_answer">Answer</string>
+  <string name="floating_chat_reply_placeholder">Quick reply…</string>
+  <string name="floating_chat_reply_queued_placeholder">Your reply will be sent when this turn ends</string>
+  <string name="floating_chat_status_failed">Generation failed</string>
+  <string name="floating_chat_status_awaiting_answer">Waiting for your answer</string>
+  <string name="floating_chat_status_awaiting_approval">Waiting for tool call confirmation</string>
+  <string name="floating_chat_status_done">Reply finished</string>
+  <string name="floating_chat_status_idle">Idle</string>
+  <string name="setting_model_page_memory_model">Memory Consolidation Model</string>
+  <string name="setting_model_page_memory_model_desc">Model used to organize conversations into long-term memory in the background; uses the fast model when not set</string>
+  <string name="setting_model_page_memory_model_follow_fast">Same as fast model</string>
 </resources>

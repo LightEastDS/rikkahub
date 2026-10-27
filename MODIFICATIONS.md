@@ -74,7 +74,7 @@
 
 | 模块 / 路径 | 改动类型 | 详细说明 |
 | :--- | :--- | :--- |
-| `app/build.gradle.kts` | 签名与版本 | 配置 Release 签名密钥，更新版本号（`3.0.0.1`，versionCode 192） |
+| `app/build.gradle.kts` | 签名与版本 | 配置 Release 签名密钥，更新版本号（`3.1.1.1`，versionCode 199） |
 | `settings.gradle.kts` | 依赖配置 | 引入阿里云 Maven 镜像仓库源加速编译 |
 | `README.md` / `README_ZH_CN.md` | 文档更新 | 移除赞助商与打赏链接，标注 Fork 分支新特性 |
 | `ChatMessageNerdLine.kt` | 功能新增 | 新增楼层 `#1, #2` 与字数统计信息展示组件 |
@@ -135,4 +135,23 @@
 * **v3.1.0.1.2**：ST 预设详情支持逐条启用/停用、上移/下移排序、恢复默认排序；未挂载/未知 marker/空内容条目标注「不适用」；调整预设卡片和详情列表布局，修复标签换行与操作区错位；数据库升级到 34；版本号 `3.1.0.1.2`（versionCode 196）。
 * **v3.1.0.1.3**：ST 预设导入时自动保存可编辑副本（原始 JSON 单独保留，可恢复默认）；条目支持点开查看/修改名称、角色、正文；`main` / `worldInfoBefore` / `worldInfoAfter` / `chatHistory` 等核心 marker 禁止停用，同时保留缺失 marker 的兜底；ST 预设改为在「助手 → 拓展管理」中启用，导入本身不启用；不使用预设的助手继续走原 ModeInjection / Lorebook 路径；数据库升级到 35；版本号 `3.1.0.1.3`（versionCode 197）。
 * **v3.1.0.2**：正式发布 ST 预设兼容（导入、副本编辑、prompt_order / marker / In-Chat depth 组装、ST 宏与会话变量、prompt-only Regex、character_book / Lorebook 世界书、provider system 适配）；新增「提示词 → ST 预设」与助手拓展管理入口；默认开启 HTTP 请求日志；数据库版本 35；版本号 `3.1.0.2`（versionCode 198）。
+* **v3.1.1.1**：
+  1. **同步官方上游 v3.1.1 架构与特性**：
+     - 新增后台生成悬浮窗支持（查看进度、快速回复与确认工具调用）；
+     - 新增记忆整理模型独立设置项；
+     - 媒体提供商配置改为独立详情页；
+     - 全文搜索与分词架构升级（移除 jieba 依赖与外部词典，提升搜索速度并缩小 APK 体积约 5MB）；
+     - 纯 Kotlin 原生实现 PDF 文本提取替换 mupdf 原生动态库，APK 缩小约 4.5MB；
+     - 扫码导入提供商由 quickie 换成 CameraX + zxing，移除未使用的依赖；
+     - 图片裁剪由 uCrop 替换为 Compose 自研 ImageCropDialog；
+     - 模型能力识别改用 models.dev 数据源，优化 token 与模型匹配机制；
+     - 修复非英文系统下余额查询数字格式错误、修复公式中 `<` 符号被当作 HTML 标签渲染失败、修复朗读带 HTML 标签等问题；
+     - 新增德语多语言支持。
+  2. **定制特性适配与延续**：
+     - 解决多语言资源与构建脚本版本冲突，无缝合并 Fork 与上游新增内容；
+     - 完整保留字数统计、消息楼层轮次（往复图标及纯数字）、隐藏楼层上下文排除（`/hide` 指令）；
+     - 完整保留 SillyTavern Chat Completion 预设兼容引擎与可视化管理体系；
+     - 保持去商业化与纯净化（清空锁定商业赞助商中转与推荐列表）；
+     - 保留独立发布签名密钥（`my-release-key.jks`）与阿里云 Maven 镜像加速；
+     - 版本号升至 `3.1.1.1`（versionCode: 199）。
 

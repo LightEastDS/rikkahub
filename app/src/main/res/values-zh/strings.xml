@@ -956,7 +956,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_response_api_warning">Response API是OpenAI新一代API，大部分提供商并不支持，如果你不知道这是什么，不要开启</string>
   <string name="setting_provider_page_save">保存</string>
   <string name="setting_provider_page_save_success">保存成功</string>
-  <string name="setting_provider_page_scan_error">错误: %s</string>
   <string name="setting_provider_page_scan_qr_code">扫描二维码</string>
   <string name="setting_provider_page_search_providers">搜索提供商</string>
   <string name="setting_provider_page_recommend">推荐提供商</string>
@@ -1115,8 +1114,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="use_web_search">网络搜索</string>
   <string name="user_default_name">用户</string>
   <string name="video">视频</string>
-  <string name="web_search_disabled">已禁用网页搜索</string>
-  <string name="web_search_enabled">已启用网页搜索</string>
   <string name="setting_theme_page_import_theme">导入</string>
   <string name="setting_theme_page_export_success">主题 JSON 已复制到剪贴板</string>
   <string name="setting_theme_page_import_success">主题导入成功</string>
@@ -1127,7 +1124,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_preferences_theme">主题</string>
   <string name="setting_page_preferences_theme_desc">动态配色、主题、AMOLED深色模式</string>
   <string name="setting_page_preferences_notification">通知</string>
-  <string name="setting_page_preferences_notification_desc">更新提醒、消息生成通知</string>
+  <string name="setting_page_preferences_notification_desc">更新提醒、消息生成通知、后台悬浮窗</string>
   <string name="setting_page_preferences_general">常规</string>
   <string name="setting_page_preferences_general_desc">交互行为、滚动、输入设置</string>
   <string name="setting_page_preferences_ui">界面偏好设置</string>
@@ -1525,7 +1522,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_media">媒体</string>
   <string name="setting_page_media_desc">图像与视频生成提供商、素材上传</string>
   <string name="setting_media_page_providers">提供商</string>
-  <string name="setting_media_page_edit_provider">编辑提供商</string>
   <string name="setting_media_page_add_provider">添加提供商</string>
   <string name="setting_media_page_empty">还没有媒体生成提供商，点右上角添加</string>
   <string name="setting_media_page_s3_desc">部分接口只接受公网地址的素材（如视频生成的参考图、参考视频）。在这里配置一个 S3 兼容的对象存储服务后，本地文件会先上传到它的桶里，再以临时地址交给接口；上传的文件 7 天后自动清理。此配置与备份的 S3 互相独立。</string>
@@ -1820,4 +1816,25 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="extension_selector_st_presets_empty">还没有导入 ST 预设</string>
   <string name="prompt_page_st_preset_modified">已修改</string>
   <string name="prompt_page_st_preset_copy_hint">当前编辑的是导入副本，原始预设已保留，可随时恢复默认。</string>
+  <string name="setting_page_preferences_notification_background_generation">后台生成</string>
+  <string name="setting_page_preferences_notification_floating_window">后台悬浮窗</string>
+  <string name="setting_page_preferences_notification_floating_window_desc">切到后台时 AI 还在回复，显示一个悬浮图标，点开可查看进度、确认工具调用和快速回复</string>
+  <string name="setting_page_preferences_notification_overlay_permission">授予悬浮窗权限</string>
+  <string name="setting_page_preferences_notification_overlay_permission_desc">没有权限时不会显示悬浮窗</string>
+  <string name="floating_chat_open_conversation">打开对话</string>
+  <string name="floating_chat_collapse">收起</string>
+  <string name="floating_chat_close">关闭悬浮窗</string>
+  <string name="floating_chat_ask_user">AI 有问题需要你回答</string>
+  <string name="floating_chat_tool_request">请求调用工具：%1$s</string>
+  <string name="floating_chat_answer">去回答</string>
+  <string name="floating_chat_reply_placeholder">快速回复…</string>
+  <string name="floating_chat_reply_queued_placeholder">回复将在本轮结束后发送</string>
+  <string name="floating_chat_status_failed">生成失败</string>
+  <string name="floating_chat_status_awaiting_answer">等待你回答问题</string>
+  <string name="floating_chat_status_awaiting_approval">等待确认工具调用</string>
+  <string name="floating_chat_status_done">回复完成</string>
+  <string name="floating_chat_status_idle">空闲</string>
+  <string name="setting_model_page_memory_model">记忆整理模型</string>
+  <string name="setting_model_page_memory_model_desc">用于在后台将对话整理为长期记忆的模型；未设置时使用快速模型</string>
+  <string name="setting_model_page_memory_model_follow_fast">跟随快速模型</string>
 </resources>
