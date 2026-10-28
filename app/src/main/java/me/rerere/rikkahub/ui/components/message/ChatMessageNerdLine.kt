@@ -53,6 +53,7 @@ import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.utils.countWords
 import me.rerere.rikkahub.utils.formatNumber
 import me.rerere.rikkahub.utils.toFixed
 import java.text.NumberFormat
@@ -169,8 +170,12 @@ fun ChatMessageNerdLine(
                                 )
                             },
                             content = {
-                                val charCount = message.parts.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().sumOf { it.text.length }
-                                Text(text = "$charCount 字")
+                                val wordCount = remember(message.parts) {
+                                    message.parts
+                                        .filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>()
+                                        .sumOf { it.text.countWords() }
+                                }
+                                Text(text = "$wordCount 字")
                             }
                         )
                     }

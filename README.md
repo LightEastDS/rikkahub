@@ -26,7 +26,7 @@ This is a customized and de-commercialized fork of RikkaHub maintained by LightE
    - **Hidden messages are excluded from AI model context requests**, saving prompt tokens and eliminating distractions from irrelevant history.
    - Messages also feature a quick toggle in the action bottom sheet.
 3. **Message Word Count Display**
-   - Displays real-time character count for each message in the stats bar. Can be enabled or disabled in **Settings -> Display Settings**.
+   - Displays real-time word count for each message in the stats bar, featuring smart multilingual counting (Chinese: characters & punctuation; English: words & punctuation; Japanese: kanji, kana & punctuation; spaces and newlines excluded). Can be toggled in **Settings -> Display Settings**.
 4. **Pure & De-commercialized**
    - Completely stripped of built-in locked third-party proxy sponsors, referral links, and affiliate parameters (AFF).
    - Removed the 100-launch donation alert popup and the donation entry in Settings.
