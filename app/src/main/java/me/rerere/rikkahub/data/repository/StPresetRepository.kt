@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.db.dao.StVariableDao
 import me.rerere.rikkahub.data.db.entity.StPresetEntity
 import me.rerere.rikkahub.data.db.entity.StVariableEntity
 import me.rerere.rikkahub.data.stpreset.StPreset
+import me.rerere.rikkahub.data.stpreset.StPromptAssembler
 import me.rerere.rikkahub.data.stpreset.StPresetDocumentEditor
 import me.rerere.rikkahub.data.stpreset.StPresetMarkers
 import me.rerere.rikkahub.data.stpreset.StPresetParseResult
@@ -111,6 +112,14 @@ class StPresetRepository(
             it.add(target, item)
         }
         saveOrder(id, updated)
+    }
+
+    /** 对指定预设的生效 prompt_order 执行 DeepSeek 极速前缀缓存友好的自动拓扑排序 */
+    suspend fun optimizeOrder(id: Uuid) {
+        val record = getRecord(id) ?: return
+        val order = currentOrder(id) ?: return
+        val optimized = StPromptAssembler.optimizeOrder(record.preset.prompts, order)
+        saveOrder(id, optimized)
     }
 
     /** 当前生效的 prompt_order；没有自定义时取预设原始桶。 */

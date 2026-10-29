@@ -40,6 +40,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedButton
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.Refresh01
+import me.rerere.hugeicons.stroke.Sorting01
 import me.rerere.hugeicons.stroke.View
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
@@ -1449,6 +1450,7 @@ private fun StPresetTab(
                 vm.moveStPrompt(record.preset.id, orderIndex, delta)
             },
             onResetPreset = { vm.resetStPreset(record.preset.id) },
+            onOptimizeOrder = { vm.optimizeStPresetOrder(record.preset.id) },
             onUpdatePrompt = { identifier, name, role, content ->
                 vm.updateStPrompt(record.preset.id, identifier, name, content, role)
             },
@@ -1568,6 +1570,7 @@ private fun StPresetEditSheet(
     onTogglePrompt: (orderIndex: Int, enabled: Boolean) -> Unit,
     onMovePrompt: (orderIndex: Int, delta: Int) -> Unit,
     onResetPreset: () -> Unit,
+    onOptimizeOrder: () -> Unit = {},
     onUpdatePrompt: (identifier: String, name: String, role: MessageRole, content: String) -> Unit,
     onLoadVariables: suspend (String) -> Map<String, String> = { emptyMap() },
     onSaveVariables: (String, Map<String, String>) -> Unit = { _, _ -> },
@@ -1677,6 +1680,11 @@ private fun StPresetEditSheet(
                             Icon(HugeIcons.View, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(8.dp))
                             Text(stringResource(R.string.prompt_page_st_preset_inspect))
+                        }
+                        OutlinedButton(onClick = onOptimizeOrder) {
+                            Icon(HugeIcons.Sorting01, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.prompt_page_st_preset_optimize_order))
                         }
                         if (record.isModified) {
                             OutlinedButton(onClick = onResetPreset) {

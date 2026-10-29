@@ -42,7 +42,7 @@ class StPromptAssemblerTest {
                 p("main", marker = true),
                 p("pre", "PRE {{char}}"),
                 p("chatHistory", marker = true),
-                p("post", "POST"),
+                p("post", "POST", role = MessageRole.USER),
                 p("inChat", "IN", inChat = true, depth = 1),
             ),
             order = listOf(
@@ -184,7 +184,7 @@ class StPromptAssemblerTest {
                 p("main", marker = true),
                 p("pre", "PRE", role = MessageRole.USER),
                 p("chatHistory", marker = true),
-                p("post", "POST"),
+                p("post", "POST {{time}}"),
             ),
             order = listOf(
                 StPromptOrderEntry("main", true),
@@ -199,7 +199,12 @@ class StPromptAssemblerTest {
             assistantSystemPrompt = "MAIN",
             flattenSystemMessages = true,
         )
-        assertEquals(listOf("MAIN", "PRE", "u1", "a1", "POST"), result.messages.map { it.toText() })
+        val texts = result.messages.map { it.toText() }
+        assertEquals("MAIN", texts[0])
+        assertEquals("PRE", texts[1])
+        assertEquals("u1", texts[2])
+        assertEquals("a1", texts[3])
+        assertTrue(texts.drop(4).any { it.startsWith("POST") })
         assertEquals(1, result.messages.count { it.role == MessageRole.SYSTEM })
         assertEquals(MessageRole.USER, result.messages.last().role)
     }
@@ -354,5 +359,94 @@ class StPromptAssemblerTest {
         assertTrue(texts.any { it.contains("<conversation_summary>") })
         assertTrue(texts.contains("Key milestone moment!"))
         assertTrue(texts.contains("Current live msg"))
+    }
+
+    @Test
+    fun `static markers and static system prompts placed after chatHistory are hoisted to Zone A before history`() {
+        val preset = preset(
+            prompts = listOf(
+                p("main", marker = true),
+                p("chatHistory", marker = true),
+                p("charDescription", marker = true),
+                p("charPersonality", marker = true),
+                p("scenario", marker = true),
+                p("dialogueExamples", marker = true),
+                p("jailbreak", "Follow formatting rules", role = MessageRole.SYSTEM),
+                p("timePrompt", "Time is {{time}}", role = MessageRole.SYSTEM),
+                p("userNudge", "Please continue", role = MessageRole.USER),
+            ),
+            order = listOf(
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("chatHistory", true),
+                StPromptOrderEntry("charDescription", true),
+                StPromptOrderEntry("charPersonality", true),
+                StPromptOrderEntry("scenario", true),
+                StPromptOrderEntry("dialogueExamples", true),
+                StPromptOrderEntry("jailbreak", true),
+                StPromptOrderEntry("timePrompt", true),
+                StPromptOrderEntry("userNudge", true),
+            ),
+        )
+        val character = CharacterCard(
+            name = "Alice",
+            systemPrompt = "MAIN_PROMPT",
+            description = "DESC",
+            personality = "PERS",
+            scenario = "SCENE",
+            mesExample = "<START>\n{{user}}: hi\n{{char}}: hello",
+        )
+        val history = listOf(UIMessage.user("u1"), UIMessage.assistant("a1"))
+        val result = StPromptAssembler.assemble(
+            preset = preset,
+            history = history,
+            character = character,
+            personaName = "Bob",
+        )
+        val texts = result.messages.map { it.toText() }
+
+        // Zone A: All static definitions hoisted BEFORE history
+        assertEquals("MAIN_PROMPT", texts[0])
+        assertEquals("DESC", texts[1])
+        assertEquals("PERS", texts[2])
+        assertEquals("SCENE", texts[3])
+        assertEquals("hi", texts[4])
+        assertEquals("hello", texts[5])
+        assertEquals("Follow formatting rules", texts[6])
+
+        // Zone B: Chat History
+        assertEquals("u1", texts[7])
+        assertEquals("a1", texts[8])
+
+        // Zone C: Dynamic items & post-history user prompt
+        assertTrue(texts.drop(9).any { it.contains("Time is") })
+        assertTrue(texts.drop(9).contains("Please continue"))
+    }
+
+    @Test
+    fun `optimizeOrder sorts static items before chatHistory and dynamic items after`() {
+        val prompts = listOf(
+            p("main", marker = true),
+            p("chatHistory", marker = true),
+            p("worldInfoAfter", marker = true),
+            p("charDescription", marker = true),
+            p("jailbreak", "Static Jailbreak", role = MessageRole.SYSTEM),
+            p("timePrompt", "Current: {{time}}"),
+            p("userReminder", "Remember this", role = MessageRole.USER),
+        )
+        val order = listOf(
+            StPromptOrderEntry("main", true),
+            StPromptOrderEntry("chatHistory", true),
+            StPromptOrderEntry("worldInfoAfter", true),
+            StPromptOrderEntry("charDescription", true),
+            StPromptOrderEntry("jailbreak", true),
+            StPromptOrderEntry("timePrompt", true),
+            StPromptOrderEntry("userReminder", true),
+        )
+        val optimized = StPromptAssembler.optimizeOrder(prompts, order)
+        val identifiers = optimized.map { it.identifier }
+        assertEquals(
+            listOf("main", "charDescription", "jailbreak", "chatHistory", "worldInfoAfter", "timePrompt", "userReminder"),
+            identifiers,
+        )
     }
 }

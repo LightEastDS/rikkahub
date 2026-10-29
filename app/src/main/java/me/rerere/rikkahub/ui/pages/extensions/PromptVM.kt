@@ -73,6 +73,12 @@ class PromptVM(
         }
     }
 
+    fun optimizeStPresetOrder(id: Uuid) {
+        viewModelScope.launch {
+            stPresetRepository.optimizeOrder(id)
+        }
+    }
+
     fun updateStPrompt(
         id: Uuid,
         identifier: String,

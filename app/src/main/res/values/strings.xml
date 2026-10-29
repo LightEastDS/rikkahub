@@ -1814,6 +1814,9 @@
   <string name="prompt_page_st_preset_move_down">Move down</string>
   <string name="prompt_page_st_preset_protected">Core</string>
   <string name="prompt_page_st_preset_restore_default">Restore default</string>
+  <string name="prompt_page_st_preset_optimize_order">Optimize order</string>
+  <string name="prompt_page_st_preset_optimize_order_desc">Sort prompts into Cache-Friendly order (Static Prefix -> Chat History -> Dynamic Tail)</string>
+  <string name="prompt_page_st_preset_optimize_order_success">Prompt order optimized for prefix cache</string>
   <string name="prompt_page_st_preset_edit">Edit prompt</string>
   <string name="prompt_page_st_preset_marker_readonly">Marker content is filled at runtime and cannot be edited here.</string>
   <string name="extension_selector_tab_st_presets">ST Presets</string>

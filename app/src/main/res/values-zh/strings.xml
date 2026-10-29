@@ -1816,6 +1816,9 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="prompt_page_st_preset_move_down">下移</string>
   <string name="prompt_page_st_preset_protected">核心</string>
   <string name="prompt_page_st_preset_restore_default">恢复默认</string>
+  <string name="prompt_page_st_preset_optimize_order">优化缓存排序</string>
+  <string name="prompt_page_st_preset_optimize_order_desc">按 DeepSeek 前缀缓存优化排序（静态设定置顶、历史单调递增、动态下沉）</string>
+  <string name="prompt_page_st_preset_optimize_order_success">已优化为前缀缓存友好排序</string>
   <string name="prompt_page_st_preset_edit">编辑提示</string>
   <string name="prompt_page_st_preset_marker_readonly">marker 内容由运行时填充，不能在这里修改正文。</string>
   <string name="extension_selector_tab_st_presets">ST 预设</string>

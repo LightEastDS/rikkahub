@@ -48,6 +48,77 @@ data class StAssemblyRequest(
  * - Zone C（动态后缀区）：关键词动态触发的世界书、环境感知时间宏下沉、In-Chat 动态提示与 Assistant Prefill。
  */
 object StPromptAssembler {
+    val STATIC_MARKERS = setOf(
+        "main",
+        "worldInfoBefore",
+        "charDescription",
+        "charPersonality",
+        "personaDescription",
+        "scenario",
+        "dialogueExamples",
+    )
+
+    private val DYNAMIC_MACRO_REGEX = Regex(
+        """\{\{\s*(time|cur_time|datetime|cur_date|date|isotime|isodate|weekday|input|lastmessage|last_message|random|pick|roll)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun isDynamicContent(content: String): Boolean {
+        return content.contains(DYNAMIC_MACRO_REGEX)
+    }
+
+    /**
+     * 对 prompt_order 进行 DeepSeek 极速前缀缓存友好的自动拓扑排序：
+     * 1. Zone A（静态前缀区）：静态 marker（main, worldInfoBefore, charDescription, charPersonality, personaDescription, scenario, dialogueExamples）以及静态系统提示词（SYSTEM 角色且不含动态宏）置顶；
+     * 2. Zone B（稳定历史区）：chatHistory 提示词放置在静态前缀之后；
+     * 3. Zone C（动态后缀区）：worldInfoAfter、含有时间/日期/输入/随机宏的提示词、以及置于历史之后的非 SYSTEM 提示词沉底。
+     *
+     * 保持各分区内部条目原本的相对顺序。
+     */
+    fun optimizeOrder(prompts: List<StPrompt>, order: List<StPromptOrderEntry>): List<StPromptOrderEntry> {
+        val promptMap = prompts.associateBy { it.identifier }
+        val zoneA = mutableListOf<StPromptOrderEntry>()
+        val zoneB = mutableListOf<StPromptOrderEntry>()
+        val zoneC = mutableListOf<StPromptOrderEntry>()
+
+        var passedHistory = false
+        order.forEach { entry ->
+            val prompt = promptMap[entry.identifier]
+            if (prompt == null) {
+                zoneC += entry
+                return@forEach
+            }
+            if (prompt.marker) {
+                when (prompt.identifier) {
+                    "chatHistory" -> {
+                        zoneB += entry
+                        passedHistory = true
+                    }
+                    "worldInfoAfter" -> zoneC += entry
+                    in STATIC_MARKERS -> zoneA += entry
+                    else -> if (passedHistory) zoneC += entry else zoneA += entry
+                }
+            } else if (prompt.isInChat) {
+                zoneC += entry
+            } else if (isDynamicContent(prompt.content)) {
+                zoneC += entry
+            } else if (prompt.role == MessageRole.SYSTEM) {
+                zoneA += entry
+            } else {
+                if (passedHistory) zoneC += entry else zoneA += entry
+            }
+        }
+
+        if (zoneB.isEmpty()) {
+            val historyPrompt = prompts.firstOrNull { it.marker && it.identifier == "chatHistory" }
+            if (historyPrompt != null) {
+                zoneB += StPromptOrderEntry(identifier = "chatHistory", enabled = true)
+            }
+        }
+
+        return zoneA + zoneB + zoneC
+    }
+
     fun assemble(req: StAssemblyRequest): StAssemblyResult {
         val preset = req.preset
         val character = req.character
@@ -132,7 +203,12 @@ object StPromptAssembler {
                 return@forEach
             }
             rendered++
-            nodes += Node.Text(textMessage(prompt.role, content))
+            val isDynamic = isDynamicContent(prompt.content)
+            nodes += Node.Text(
+                message = textMessage(prompt.role, content),
+                role = prompt.role,
+                isDynamic = isDynamic,
+            )
         }
 
         // =========================================================================
@@ -237,16 +313,28 @@ object StPromptAssembler {
         nodes.forEach { node ->
             when (node) {
                 is Node.Text -> {
-                    if (inPostHistory) {
+                    if (node.isDynamic) {
                         zoneC += node.message
-                    } else {
+                    } else if (node.role == MessageRole.SYSTEM) {
+                        // 静态系统提示词始终置于 Zone A 静态前缀区，保证 100% 缓存命中
                         zoneA += node.message
+                    } else {
+                        if (inPostHistory) {
+                            zoneC += node.message
+                        } else {
+                            zoneA += node.message
+                        }
                     }
                 }
                 is Node.Marker -> {
                     if (node.identifier == "chatHistory") {
-                        populateZoneB()
                         inPostHistory = true
+                    } else if (node.identifier in STATIC_MARKERS) {
+                        // 静态设定 marker（main/charDesc/scenario/examples等）始终进入 Zone A
+                        resolveMarker(node.identifier, node.prompt, zoneA)
+                    } else if (node.identifier == "worldInfoAfter") {
+                        // 动态触发世界书始终进入 Zone C
+                        resolveMarker(node.identifier, node.prompt, zoneC)
                     } else {
                         if (inPostHistory) {
                             resolveMarker(node.identifier, node.prompt, zoneC)
@@ -258,8 +346,10 @@ object StPromptAssembler {
             }
         }
 
-        if (!historyFound && req.liveMessages.isNotEmpty()) {
-            populateZoneB()
+        // Zone B: 填充历史会话流
+        populateZoneB()
+
+        if (!inPostHistory && req.liveMessages.isNotEmpty()) {
             warnings += "预设没有启用 chatHistory marker，聊天记录已追加到提示词末尾"
         }
 
@@ -624,7 +714,11 @@ object StPromptAssembler {
     }
 
     private sealed interface Node {
-        data class Text(val message: UIMessage) : Node
+        data class Text(
+            val message: UIMessage,
+            val role: MessageRole,
+            val isDynamic: Boolean,
+        ) : Node
         data class Marker(val identifier: String, val prompt: StPrompt) : Node
     }
 

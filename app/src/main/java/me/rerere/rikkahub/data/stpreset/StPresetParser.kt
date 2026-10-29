@@ -102,7 +102,11 @@ object StPresetParser {
             throw StPresetParseException("没有解析出任何可用提示")
         }
 
-        val promptOrder = parsePromptOrder(root, warnings)
+        val rawPromptOrder = parsePromptOrder(root, warnings)
+        // 自动按 DeepSeek 极速前缀缓存架构对 prompt_order 进行排序优化（静态设定置顶、历史单调递增、动态下沉）
+        val promptOrder = rawPromptOrder.map { bucket ->
+            bucket.copy(order = StPromptAssembler.optimizeOrder(prompts, bucket.order))
+        }
         if (promptOrder.isEmpty()) {
             warnings += "prompt_order 为空，将按 prompts 数组顺序发送"
         }
