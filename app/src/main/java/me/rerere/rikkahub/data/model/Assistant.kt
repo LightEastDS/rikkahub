@@ -58,6 +58,16 @@ data class Assistant(
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
 )
 
+/**
+ * 启用的扩展项总数（快捷消息 + 模式注入 + 世界书 + 技能 + ST 预设）
+ */
+val Assistant.activeExtensionsCount: Int
+    get() = quickMessageIds.size +
+        modeInjectionIds.size +
+        lorebookIds.size +
+        enabledSkills.size +
+        (if (stPresetId != null) 1 else 0)
+
 @Serializable
 data class QuickMessage(
     val id: Uuid = Uuid.random(),

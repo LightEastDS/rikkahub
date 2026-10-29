@@ -73,6 +73,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.activeExtensionsCount
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.lastContextTokens
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
@@ -285,12 +286,8 @@ internal fun FilesPicker(
                         )
                     }
 
-                    // Extensions (Quick Messages + Prompt Injections + Skills)
-                    val activeCount =
-                        assistant.quickMessageIds.size +
-                            assistant.modeInjectionIds.size +
-                            assistant.lorebookIds.size +
-                            assistant.enabledSkills.size
+                    // Extensions (Quick Messages + Prompt Injections + Lorebooks + Skills + ST Presets)
+                    val activeCount = assistant.activeExtensionsCount
                     SegmentedListItem(
                         onClick = { page = FilesPickerPage.EXTENSIONS },
                         shapes = ListItemDefaults.segmentedShapes(index = itemIndex++, count = itemCount),
