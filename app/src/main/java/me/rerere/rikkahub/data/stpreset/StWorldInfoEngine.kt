@@ -13,12 +13,27 @@ data class StWorldInfoDepthEntry(
     val order: Int = 100,
 )
 
+data class StWorldInfoEntry(
+    val name: String,
+    val content: String,
+    val role: MessageRole = MessageRole.SYSTEM,
+    val isConstant: Boolean = false,
+) {
+    fun toSystemMessage(): UIMessage = when (role) {
+        MessageRole.ASSISTANT -> UIMessage.assistant(content)
+        MessageRole.USER -> UIMessage.user(content)
+        else -> UIMessage.system(content)
+    }.copy(isSynthetic = true)
+}
+
 data class StWorldInfoResult(
     val before: String = "",
     val after: String = "",
     val depthEntries: List<StWorldInfoDepthEntry> = emptyList(),
     val activatedNames: List<String> = emptyList(),
     val warnings: List<String> = emptyList(),
+    val constantEntries: List<StWorldInfoEntry> = emptyList(),
+    val dynamicTriggeredEntries: List<StWorldInfoEntry> = emptyList(),
 )
 
 /**
@@ -55,6 +70,7 @@ object StWorldInfoEngine {
                 depth = entry.depth,
                 role = entry.role,
                 order = entry.order,
+                isConstant = entry.constant,
             )
         }
 
@@ -91,6 +107,7 @@ object StWorldInfoEngine {
                     depth = depth,
                     role = entry.role,
                     order = entry.priority,
+                    isConstant = entry.constantActive,
                 )
             }
         }
@@ -101,6 +118,8 @@ object StWorldInfoEngine {
         val before = StringBuilder()
         val after = StringBuilder()
         val depth = mutableListOf<StWorldInfoDepthEntry>()
+        val constantList = mutableListOf<StWorldInfoEntry>()
+        val dynamicList = mutableListOf<StWorldInfoEntry>()
         var used = 0
         val names = mutableListOf<String>()
         sorted.forEach { entry ->
@@ -112,6 +131,17 @@ object StWorldInfoEngine {
             val text = if (entry.content.length > remaining) entry.content.take(remaining) else entry.content
             used += text.length
             names += entry.name
+            val infoEntry = StWorldInfoEntry(
+                name = entry.name,
+                content = text,
+                role = entry.role,
+                isConstant = entry.isConstant,
+            )
+            if (entry.isConstant) {
+                constantList += infoEntry
+            } else {
+                dynamicList += infoEntry
+            }
             when (entry.position) {
                 WorldPosition.BEFORE -> if (text.isNotBlank()) before.append(text).append('\n')
                 WorldPosition.AFTER -> if (text.isNotBlank()) after.append(text).append('\n')
@@ -129,6 +159,8 @@ object StWorldInfoEngine {
             depthEntries = depth,
             activatedNames = names,
             warnings = warnings,
+            constantEntries = constantList,
+            dynamicTriggeredEntries = dynamicList,
         )
     }
 
@@ -193,5 +225,6 @@ object StWorldInfoEngine {
         val depth: Int,
         val role: MessageRole,
         val order: Int,
+        val isConstant: Boolean = false,
     )
 }

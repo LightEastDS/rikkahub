@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import androidx.compose.foundation.BorderStroke
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.ArrowDown01
@@ -56,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -126,6 +129,7 @@ fun ChatList(
     previewMode: Boolean,
     settings: Settings,
     hazeState: HazeState,
+    checkpoint: ConversationCheckpointEntity? = null,
     errors: List<ChatError> = emptyList(),
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
@@ -169,6 +173,7 @@ fun ChatList(
                 processingStatus = processingStatus,
                 settings = settings,
                 hazeState = hazeState,
+                checkpoint = checkpoint,
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
@@ -219,6 +224,7 @@ private fun ChatListNormal(
     processingStatus: String? = null,
     settings: Settings,
     hazeState: HazeState,
+    checkpoint: ConversationCheckpointEntity? = null,
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
@@ -296,6 +302,16 @@ private fun ChatListNormal(
             .associateBy { it.id }
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
+    var isCheckpointExpanded by rememberSaveable(checkpoint?.id) { mutableStateOf(false) }
+    val visibleNodesWithIndex = remember(conversation.messageNodes, checkpoint, isCheckpointExpanded) {
+        conversation.messageNodes.mapIndexed { index, node -> index to node }.filter { (index, _) ->
+            if (checkpoint != null && !isCheckpointExpanded) {
+                index >= checkpoint.boundaryFloor
+            } else {
+                true
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -343,10 +359,20 @@ private fun ChatListNormal(
                     .topFadingEdge(innerPadding.calculateTopPadding() + 24.dp)
                     .hazeSource(state = hazeState),
             ) {
-            itemsIndexed(
-                items = conversation.messageNodes,
-                key = { index, item -> item.id },
-            ) { index, node ->
+            if (checkpoint != null) {
+                item(key = "checkpoint_${checkpoint.id}") {
+                    CheckpointFoldCard(
+                        checkpoint = checkpoint,
+                        isExpanded = isCheckpointExpanded,
+                        onToggleExpand = { isCheckpointExpanded = !isCheckpointExpanded },
+                    )
+                }
+            }
+
+            items(
+                items = visibleNodesWithIndex,
+                key = { (_, item) -> item.id },
+            ) { (index, node) ->
                 Column {
                     ListSelectableItem(
                         key = node.id,
@@ -878,6 +904,65 @@ private fun BoxScope.MessageJumper(
                         .padding(4.dp)
                 )
             }
+        }
+    }
+}
+
+private fun formatTokens(tokens: Int): String =
+    if (tokens >= 1000) "${tokens / 1000}K" else "$tokens"
+
+@Composable
+private fun CheckpointFoldCard(
+    checkpoint: ConversationCheckpointEntity,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    ) {
+        Column(
+            modifier = Modifier
+                .clickable { onToggleExpand() }
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = "🗜️",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "早期对话已压缩为背景记忆",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = if (isExpanded) "点击折叠" else "展开回看原文",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Text(
+                text = "${formatTokens(checkpoint.originalTokens)} → ${formatTokens(checkpoint.compressedTokens)}，已折叠 ${checkpoint.boundaryFloor} 轮",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            )
         }
     }
 }

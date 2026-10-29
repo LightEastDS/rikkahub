@@ -75,4 +75,47 @@ class StMacroResolverTest {
         val resolver = StMacroResolver()
         assertEquals("abc", resolver.render("a{{// note}}bc", context))
     }
+
+    @Test
+    fun `var alias and colon tolerance works`() {
+        val variables = mutableMapOf("mood" to "cheerful", "score" to "100")
+        val resolver = StMacroResolver(variables)
+        assertEquals("cheerful", resolver.render("{{var::mood}}", context))
+        assertEquals("cheerful", resolver.render("{{var:mood}}", context))
+        assertEquals("cheerful", resolver.render("{{getvar:mood}}", context))
+        assertEquals("100", resolver.render("{{var::score}}", context))
+
+        resolver.render("{{setvar:role:warrior}}", context)
+        assertEquals("warrior", variables["role"])
+
+        resolver.render("{{setvar::weapon=sword}}", context)
+        assertEquals("sword", variables["weapon"])
+    }
+
+    @Test
+    fun `handlebars conditional blocks evaluate properly`() {
+        val variables = mutableMapOf("enable" to "1", "disabled_flag" to "0")
+        val resolver = StMacroResolver(variables)
+        assertEquals("YES", resolver.render("{{#if {{getvar::enable}}}}YES{{/if}}", context))
+        assertEquals("", resolver.render("{{#if {{getvar::disabled_flag}}}}YES{{/if}}", context))
+        assertEquals("NOPE", resolver.render("{{#unless {{getvar::disabled_flag}}}}NOPE{{/unless}}", context))
+        assertEquals("", resolver.render("{{#unless {{getvar::enable}}}}NOPE{{/unless}}", context))
+    }
+
+    @Test
+    fun `two-pass pre-scan resolves reverse dependency across prompts`() {
+        val prompts = listOf(
+            StPrompt(identifier = "p1", name = "p1", content = "Role is {{getvar::role}}"),
+            StPrompt(identifier = "p2", name = "p2", content = "{{setvar::role::Hero}}"),
+        )
+        val scannedVars = StMacroResolver.preScanVariables(
+            prompts = prompts,
+            persistedVariables = emptyMap(),
+            context = context,
+        )
+        assertEquals("Hero", scannedVars["role"])
+        val resolver = StMacroResolver(variables = scannedVars)
+        val rendered = resolver.render(prompts[0].content, context)
+        assertEquals("Role is Hero", rendered)
+    }
 }

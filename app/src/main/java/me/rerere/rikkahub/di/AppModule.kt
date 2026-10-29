@@ -123,6 +123,7 @@ val appModule = module {
             workspaceRepository = get(),
             stPresetRepository = get(),
             stVariableRepository = get(),
+            checkpointRepository = get(),
         )
     }
 
@@ -139,7 +140,8 @@ val appModule = module {
             metaGenerator = get(),
             mcpManager = get(),
             filesManager = get(),
-            folderRepository = get()
+            folderRepository = get(),
+            checkpointRepository = get(),
         )
     }
 

@@ -40,6 +40,8 @@ import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.NodeFavoriteTarget
 import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.data.model.getChatModelOf
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
+import me.rerere.rikkahub.data.repository.ConversationCheckpointRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
@@ -62,9 +64,14 @@ class ChatVM(
     private val analytics: FirebaseAnalytics,
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
+    private val checkpointRepository: ConversationCheckpointRepository,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val latestCheckpoint: StateFlow<ConversationCheckpointEntity?> =
+        checkpointRepository
+            .observeLatest(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
@@ -264,6 +271,13 @@ class ChatVM(
     fun executeHideCommand(command: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val result = chatService.executeHideCommand(_conversationId, command)
+            onResult(result.success, result.message)
+        }
+    }
+
+    fun executeCompactCommand(command: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = chatService.executeCompactCommand(_conversationId, command)
             onResult(result.success, result.message)
         }
     }

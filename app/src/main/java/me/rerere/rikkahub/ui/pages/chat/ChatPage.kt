@@ -288,6 +288,7 @@ private fun ChatPageContent(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
+    val checkpoint by vm.latestCheckpoint.collectAsStateWithLifecycle()
 
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
@@ -371,6 +372,13 @@ private fun ChatPageContent(
                             inputState.clearInput()
                             return@ChatInput
                         }
+                        if (!inputState.isEditing() && ChatService.isCompactCommand(text)) {
+                            vm.executeCompactCommand(text) { success, message ->
+                                toaster.show(message, type = if (success) ToastType.Success else ToastType.Warning)
+                            }
+                            inputState.clearInput()
+                            return@ChatInput
+                        }
                         if (currentChatModel == null) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                             return@ChatInput
@@ -393,6 +401,13 @@ private fun ChatPageContent(
                         val text = inputState.textContent.text.toString().trim()
                         if (!inputState.isEditing() && ChatService.isHideCommand(text)) {
                             vm.executeHideCommand(text) { success, message ->
+                                toaster.show(message, type = if (success) ToastType.Success else ToastType.Warning)
+                            }
+                            inputState.clearInput()
+                            return@ChatInput
+                        }
+                        if (!inputState.isEditing() && ChatService.isCompactCommand(text)) {
+                            vm.executeCompactCommand(text) { success, message ->
                                 toaster.show(message, type = if (success) ToastType.Success else ToastType.Warning)
                             }
                             inputState.clearInput()
@@ -423,6 +438,7 @@ private fun ChatPageContent(
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                checkpoint = checkpoint,
                 state = chatListState,
                 loading = loadingJob != null,
                 processingStatus = processingStatus,

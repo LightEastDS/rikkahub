@@ -2,7 +2,9 @@ package me.rerere.rikkahub.data.stpreset
 
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.rikkahub.data.model.CharacterCard
+import kotlin.uuid.Uuid
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -200,5 +202,157 @@ class StPromptAssemblerTest {
         assertEquals(listOf("MAIN", "PRE", "u1", "a1", "POST"), result.messages.map { it.toText() })
         assertEquals(1, result.messages.count { it.role == MessageRole.SYSTEM })
         assertEquals(MessageRole.USER, result.messages.last().role)
+    }
+
+    @Test
+    fun `three-zone assembly separates static prefix, stable history, and dynamic tail`() {
+        val preset = preset(
+            prompts = listOf(
+                p("main", marker = true),
+                p("charDescription", marker = true),
+                p("worldInfoBefore", marker = true),
+                p("chatHistory", marker = true),
+                p("worldInfoAfter", marker = true),
+                p("timePrompt", "Current: {{time}}"),
+            ),
+            order = listOf(
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("charDescription", true),
+                StPromptOrderEntry("worldInfoBefore", true),
+                StPromptOrderEntry("chatHistory", true),
+                StPromptOrderEntry("worldInfoAfter", true),
+                StPromptOrderEntry("timePrompt", true),
+            ),
+        )
+        val worldInfo = StWorldInfoResult(
+            constantEntries = listOf(StWorldInfoEntry("rules", "Constant World Rules", isConstant = true)),
+            dynamicTriggeredEntries = listOf(StWorldInfoEntry("monster", "A wild dragon appears!", isConstant = false)),
+        )
+        val character = CharacterCard(name = "Hero", description = "A brave knight", systemPrompt = "SYS")
+        val history = listOf(UIMessage.user("Let's fight!"), UIMessage.assistant("I am ready."))
+
+        val result = StPromptAssembler.assemble(
+            preset = preset,
+            history = history,
+            character = character,
+            worldInfo = worldInfo,
+        )
+
+        // Zone A: SYS (0), A brave knight (1), Constant World Rules (2)
+        assertEquals("SYS", result.messages[0].toText())
+        assertEquals("A brave knight", result.messages[1].toText())
+        assertEquals("Constant World Rules", result.messages[2].toText())
+
+        // Zone B: History
+        assertEquals("Let's fight!", result.messages[3].toText())
+        assertEquals("I am ready.", result.messages[4].toText())
+
+        // Zone C: Dynamic Worldbook and Environment Time Sink at tail
+        val tailTexts = result.messages.drop(5).map { it.toText() }
+        assertTrue(tailTexts.any { it.contains("A wild dragon appears!") })
+        assertTrue(tailTexts.any { it.contains("Environment Context: Time=") || it.contains("Current:") })
+    }
+
+    @Test
+    fun `compaction checkpoint injects summary, trims history, and filters hidden messages`() {
+        val preset = preset(
+            prompts = listOf(
+                p("main", marker = true),
+                p("chatHistory", marker = true),
+            ),
+            order = listOf(
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("chatHistory", true),
+            ),
+        )
+        val m1 = UIMessage.user("Old msg 1")
+        val m2 = UIMessage.assistant("Old reply 1")
+        val m3 = UIMessage.user("Old msg 2 (hidden)").copy(isHidden = true)
+        val m4 = UIMessage.assistant("Old reply 2")
+        val m5 = UIMessage.user("Live message 1")
+        val m6 = UIMessage.assistant("Live reply (hidden)").copy(isHidden = true)
+        val m7 = UIMessage.user("Live message 2")
+
+        val checkpoint = ConversationCheckpointEntity(
+            conversationId = "conv-1",
+            boundaryNodeId = m4.id.toString(),
+            boundaryFloor = 4,
+            summaryContent = "Summary of turns 1-4",
+            originalTokens = 10000,
+            compressedTokens = 500,
+        )
+
+        val result = StPromptAssembler.assemble(
+            preset = preset,
+            history = listOf(m1, m2, m3, m4, m5, m6, m7),
+            assistantSystemPrompt = "SYSTEM",
+            checkpoint = checkpoint,
+        )
+
+        val texts = result.messages.map { it.toText() }
+        // System prompt
+        assertEquals("SYSTEM", texts[0])
+        // Checkpoint summary in Zone B
+        assertTrue(texts[1].contains("<conversation_summary>"))
+        assertTrue(texts[1].contains("Summary of turns 1-4"))
+        // Messages before boundary (m1, m2, m3, m4) are compacted away
+        assertTrue(!texts.contains("Old msg 1"))
+        assertTrue(!texts.contains("Old reply 1"))
+        assertTrue(!texts.contains("Old msg 2 (hidden)"))
+        assertTrue(!texts.contains("Old reply 2"))
+        // Hidden live message m6 is filtered out
+        assertTrue(!texts.contains("Live reply (hidden)"))
+        // Live non-hidden messages are preserved
+        assertTrue(texts.contains("Live message 1"))
+        assertTrue(texts.contains("Live message 2"))
+    }
+
+    @Test
+    fun milestoneWhitelistPassesThroughAfterCheckpointSummary() {
+        val preset = StPreset(
+            id = Uuid.random(),
+            name = "Milestone Test",
+            prompts = listOf(
+                StPrompt(identifier = "main", content = "SYSTEM", marker = true, role = MessageRole.SYSTEM),
+                StPrompt(identifier = "chatHistory", content = "", marker = true, role = MessageRole.SYSTEM),
+            ),
+            promptOrder = listOf(
+                StPromptOrderBucket(
+                    characterId = StPromptOrderBucket.GLOBAL_CHARACTER_ID,
+                    order = listOf(
+                        StPromptOrderEntry("main", true),
+                        StPromptOrderEntry("chatHistory", true),
+                    ),
+                )
+            ),
+        )
+
+        val m1 = UIMessage.user("Normal old msg")
+        val m2 = UIMessage.assistant("Key milestone moment!")
+        val m3 = UIMessage.user("Another old msg")
+        val m4 = UIMessage.assistant("Current live msg")
+
+        val checkpoint = ConversationCheckpointEntity(
+            conversationId = "conv-1",
+            boundaryNodeId = m3.id.toString(),
+            boundaryFloor = 3,
+            summaryContent = "Summary of past events",
+            originalTokens = 5000,
+            compressedTokens = 300,
+        )
+
+        val result = StPromptAssembler.assemble(
+            preset = preset,
+            history = listOf(m1, m2, m3, m4),
+            checkpoint = checkpoint,
+            milestoneMessageIds = setOf(m2.id.toString()),
+        )
+
+        val texts = result.messages.map { it.toText() }
+        assertTrue(!texts.contains("Normal old msg"))
+        assertTrue(!texts.contains("Another old msg"))
+        assertTrue(texts.any { it.contains("<conversation_summary>") })
+        assertTrue(texts.contains("Key milestone moment!"))
+        assertTrue(texts.contains("Current live msg"))
     }
 }

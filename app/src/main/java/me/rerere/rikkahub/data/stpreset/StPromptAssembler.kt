@@ -2,12 +2,15 @@ package me.rerere.rikkahub.data.stpreset
 
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toJavaLocalDateTime
 import kotlinx.datetime.toLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.transformers.findSafeInsertIndex
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.rikkahub.data.model.CharacterCard
+import java.time.format.DateTimeFormatter
 import kotlin.random.Random
 import kotlin.time.Clock
 
@@ -16,34 +19,38 @@ data class StAssemblyResult(
     val report: StAssemblyReport,
 )
 
+data class StAssemblyRequest(
+    val preset: StPreset,
+    val liveMessages: List<UIMessage>,
+    val character: CharacterCard? = null,
+    val assistantSystemPrompt: String = "",
+    val personaName: String = "",
+    val personaDescription: String = "",
+    val modelName: String = "",
+    val generationType: StGenerationType = StGenerationType.NORMAL,
+    val extraSystemPrompt: String = "",
+    val worldInfo: StWorldInfoResult = StWorldInfoResult(),
+    val checkpoint: ConversationCheckpointEntity? = null,
+    val milestoneMessageIds: Set<String> = emptySet(),
+    val variables: MutableMap<String, String> = mutableMapOf(),
+    val globalVariables: MutableMap<String, String> = mutableMapOf(),
+    val random: Random = Random.Default,
+    val now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+    val flattenSystemMessages: Boolean = false,
+)
+
 /**
  * SillyTavern Chat Completion 预设的提示词组装器。
  *
- * 顺序的唯一来源是 `prompt_order`；`prompts[]` 只是定义库。marker 是动态内容插入点，
- * in-chat prompt 从 relative 序列中移除后按 depth 插入。最后才做 system 合并和 prefill。
+ * 实现了 DeepSeek 极速缓存友好的三区动静隔离时序架构（Zone A / Zone B / Zone C）：
+ * - Zone A（静态前缀区）：系统基础设定、角色卡、常驻世界书，绝对冻结保证 100% 缓存命中；
+ * - Zone B（稳定历史区）：检查点结构化摘要与单调递增对话历史，联动 isHidden 过滤；
+ * - Zone C（动态后缀区）：关键词动态触发的世界书、环境感知时间宏下沉、In-Chat 动态提示与 Assistant Prefill。
  */
 object StPromptAssembler {
-    fun assemble(
-        preset: StPreset,
-        history: List<UIMessage>,
-        character: CharacterCard? = null,
-        assistantSystemPrompt: String = "",
-        personaName: String = "",
-        personaDescription: String = "",
-        modelName: String = "",
-        generationType: StGenerationType = StGenerationType.NORMAL,
-        extraSystemPrompt: String = "",
-        worldInfo: StWorldInfoResult = StWorldInfoResult(),
-        variables: MutableMap<String, String> = mutableMapOf(),
-        globalVariables: MutableMap<String, String> = mutableMapOf(),
-        random: Random = Random.Default,
-        now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
-        /**
-         * 某些 provider（Claude / Gemini / OpenAI Responses）只接受一条顶层 system，
-         * 开启后把开头的 system 合并，历史之后的 system 降级成 user。
-         */
-        flattenSystemMessages: Boolean = false,
-    ): StAssemblyResult {
+    fun assemble(req: StAssemblyRequest): StAssemblyResult {
+        val preset = req.preset
+        val character = req.character
         val warnings = mutableListOf<String>()
         val bucket = chooseBucket(preset, warnings)
         val promptMap = preset.prompts.associateBy { it.identifier }
@@ -53,17 +60,31 @@ object StPromptAssembler {
 
         val macroContext = buildMacroContext(
             character = character,
-            personaName = personaName,
-            personaDescription = personaDescription,
-            modelName = modelName,
-            history = history,
+            personaName = req.personaName,
+            personaDescription = req.personaDescription,
+            modelName = req.modelName,
+            history = req.liveMessages,
         )
+
+        // Pass 1 & Pass 2: 变量预扫描与拓扑依赖展开
+        val preScannedVars = StMacroResolver.preScanVariables(
+            prompts = preset.prompts,
+            persistedVariables = req.variables,
+            context = macroContext,
+            random = req.random,
+            now = req.now,
+        )
+        req.variables.putAll(preScannedVars)
+
         val macroResolver = StMacroResolver(
-            variables = variables,
-            globalVariables = globalVariables,
-            random = random,
-            now = now,
+            variables = req.variables,
+            globalVariables = req.globalVariables,
+            random = req.random,
+            now = req.now,
         )
+
+        val timeMacroRegex = Regex("""\{\{\s*(time|cur_time|datetime|cur_date|date|isotime|isodate|weekday)\s*\}\}""", RegexOption.IGNORE_CASE)
+        var presetRequiresEnvironmentTime = false
 
         val nodes = mutableListOf<Node>()
         val inChat = mutableListOf<InChatPrompt>()
@@ -83,9 +104,12 @@ object StPromptAssembler {
                 warnings += "prompt_order 引用的「${entry.identifier}」不存在"
                 return@forEach
             }
-            if (!triggerMatches(prompt, generationType)) {
+            if (!triggerMatches(prompt, req.generationType)) {
                 skippedTrigger++
                 return@forEach
+            }
+            if (prompt.content.contains(timeMacroRegex)) {
+                presetRequiresEnvironmentTime = true
             }
             if (prompt.isInChat) {
                 inChat += InChatPrompt(
@@ -111,82 +135,152 @@ object StPromptAssembler {
             nodes += Node.Text(textMessage(prompt.role, content))
         }
 
-        val messages = mutableListOf<UIMessage>()
-        if (extraSystemPrompt.isNotBlank()) {
-            messages += systemMessage(extraSystemPrompt)
+        // =========================================================================
+        // 【Zone A: 静态前缀区 (Static Prefix)】-> 绝对冻结，保证第 0 个 token 开始全中
+        // =========================================================================
+        val zoneA = mutableListOf<UIMessage>()
+        if (req.extraSystemPrompt.isNotBlank()) {
+            zoneA += systemMessage(req.extraSystemPrompt)
         }
 
+        // =========================================================================
+        // 【Zone B: 稳定历史区 (Append-only Stream)】-> 严格单调递增流
+        // =========================================================================
+        val zoneB = mutableListOf<UIMessage>()
+
+        // =========================================================================
+        // 【Zone C: 动态后缀区 (Turn-Tail Dynamic)】-> 所有易变内容沉底
+        // =========================================================================
+        val zoneC = mutableListOf<UIMessage>()
+
         val unknownMarkers = linkedSetOf<String>()
-        var historyStart = 0
-        var historyEnd = 0
         var historyFound = false
+
+        fun resolveMarker(identifier: String, prompt: StPrompt, targetList: MutableList<UIMessage>) {
+            when (identifier) {
+                "main" -> {
+                    val text = resolveMainPrompt(prompt, character, req.assistantSystemPrompt)
+                    if (text.isNotBlank()) targetList += systemMessage(text)
+                }
+                "worldInfoBefore" -> {
+                    if (req.worldInfo.constantEntries.isNotEmpty()) {
+                        targetList += req.worldInfo.constantEntries.map { it.toSystemMessage() }
+                    } else if (req.worldInfo.before.isNotBlank()) {
+                        val text = macroResolver.render(req.worldInfo.before, macroContext)
+                        if (text.isNotBlank()) targetList += systemMessage(text)
+                    }
+                }
+                "worldInfoAfter" -> {
+                    if (req.worldInfo.dynamicTriggeredEntries.isNotEmpty()) {
+                        zoneC += req.worldInfo.dynamicTriggeredEntries.map { it.toSystemMessage() }
+                    } else if (req.worldInfo.after.isNotBlank()) {
+                        val text = macroResolver.render(req.worldInfo.after, macroContext)
+                        if (text.isNotBlank()) zoneC += systemMessage(text)
+                    }
+                }
+                "charDescription" -> character?.description?.takeIf { it.isNotBlank() }?.let {
+                    targetList += systemMessage(it)
+                }
+                "charPersonality" -> character?.personality?.takeIf { it.isNotBlank() }?.let {
+                    targetList += systemMessage(it)
+                }
+                "personaDescription" -> if (req.personaDescription.isNotBlank()) {
+                    targetList += systemMessage(req.personaDescription)
+                }
+                "scenario" -> character?.scenario?.takeIf { it.isNotBlank() }?.let {
+                    targetList += systemMessage(it)
+                }
+                "dialogueExamples" -> character?.mesExample?.takeIf { it.isNotBlank() }?.let {
+                    targetList += parseDialogueExamples(
+                        raw = it,
+                        characterName = character.name,
+                        userName = req.personaName,
+                    )
+                }
+                else -> unknownMarkers += identifier
+            }
+        }
+
+        fun populateZoneB() {
+            if (req.checkpoint != null) {
+                zoneB += systemMessage(
+                    """
+                    <conversation_summary>
+                    [以下是历史会话（第 1 轮至第 ${req.checkpoint.boundaryFloor} 轮）的核心大纲与背景记忆，请将其视为既定事实并在此基础上继续对话]
+                    ${req.checkpoint.summaryContent}
+                    </conversation_summary>
+                    """.trimIndent()
+                )
+                // 高光时刻穿透 (Milestone Whitelist)：压缩区间内被收藏/固定的非隐藏消息
+                val boundaryIndex = req.liveMessages.indexOfLast { it.id.toString() == req.checkpoint.boundaryNodeId }
+                val beforeCheckpoint = if (boundaryIndex >= 0) {
+                    req.liveMessages.take(boundaryIndex + 1)
+                } else if (req.checkpoint.boundaryFloor in 1..req.liveMessages.size) {
+                    req.liveMessages.take(req.checkpoint.boundaryFloor)
+                } else {
+                    emptyList()
+                }
+                val milestones = beforeCheckpoint.filter { msg ->
+                    !msg.isHidden && req.milestoneMessageIds.contains(msg.id.toString())
+                }
+                zoneB += milestones
+
+                val liveAfter = filterAfterCheckpoint(req.liveMessages, req.checkpoint)
+                zoneB += liveAfter.filterNot { it.isHidden }
+            } else {
+                zoneB += req.liveMessages.filterNot { it.isHidden }
+            }
+            historyFound = true
+        }
+
+        var inPostHistory = false
         nodes.forEach { node ->
             when (node) {
-                is Node.Text -> messages += node.message
+                is Node.Text -> {
+                    if (inPostHistory) {
+                        zoneC += node.message
+                    } else {
+                        zoneA += node.message
+                    }
+                }
                 is Node.Marker -> {
-                    when (node.identifier) {
-                        "chatHistory" -> {
-                            historyStart = messages.size
-                            if (history.isNotEmpty()) messages += history
-                            historyEnd = messages.size
-                            historyFound = true
+                    if (node.identifier == "chatHistory") {
+                        populateZoneB()
+                        inPostHistory = true
+                    } else {
+                        if (inPostHistory) {
+                            resolveMarker(node.identifier, node.prompt, zoneC)
+                        } else {
+                            resolveMarker(node.identifier, node.prompt, zoneA)
                         }
-                        "main" -> {
-                            val text = resolveMainPrompt(node.prompt, character, assistantSystemPrompt)
-                            if (text.isNotBlank()) messages += systemMessage(text)
-                        }
-
-                        "worldInfoBefore" -> if (worldInfo.before.isNotBlank()) {
-                            val text = macroResolver.render(worldInfo.before, macroContext)
-                            if (text.isNotBlank()) messages += systemMessage(text)
-                        }
-
-                        "worldInfoAfter" -> if (worldInfo.after.isNotBlank()) {
-                            val text = macroResolver.render(worldInfo.after, macroContext)
-                            if (text.isNotBlank()) messages += systemMessage(text)
-                        }
-
-                        "charDescription" -> character?.description?.takeIf { it.isNotBlank() }?.let {
-                            messages += systemMessage(it)
-                        }
-
-                        "charPersonality" -> character?.personality?.takeIf { it.isNotBlank() }?.let {
-                            messages += systemMessage(it)
-                        }
-
-                        "personaDescription" -> if (personaDescription.isNotBlank()) {
-                            messages += systemMessage(personaDescription)
-                        }
-
-                        "scenario" -> character?.scenario?.takeIf { it.isNotBlank() }?.let {
-                            messages += systemMessage(it)
-                        }
-
-                        "dialogueExamples" -> character?.mesExample?.takeIf { it.isNotBlank() }?.let {
-                            messages += parseDialogueExamples(
-                                raw = it,
-                                characterName = character.name,
-                                userName = personaName,
-                            )
-                        }
-
-                        else -> unknownMarkers += node.identifier
                     }
                 }
             }
         }
 
-        // 预设没有 chatHistory marker 时也不能把聊天记录丢掉：放在最后，保证模型能看到当前对话。
-        if (!historyFound && history.isNotEmpty()) {
-            historyStart = messages.size
-            messages += history
-            historyEnd = messages.size
-            historyFound = true
+        if (!historyFound && req.liveMessages.isNotEmpty()) {
+            populateZoneB()
             warnings += "预设没有启用 chatHistory marker，聊天记录已追加到提示词末尾"
         }
 
+        // 常驻世界书保底：如果没有显式启用 worldInfoBefore marker，常驻条目注入到 Zone A
+        if (!preset.hasEnabledMarker("worldInfoBefore") && req.worldInfo.constantEntries.isNotEmpty() && zoneA.none { msg -> req.worldInfo.constantEntries.any { it.content == msg.toText() } }) {
+            zoneA += req.worldInfo.constantEntries.map { it.toSystemMessage() }
+        }
+
+        // 动态世界书：动静分离，始终注入到 Zone C 头部（历史之后）
+        if (req.worldInfo.dynamicTriggeredEntries.isNotEmpty() && zoneC.none { msg -> req.worldInfo.dynamicTriggeredEntries.any { it.content == msg.toText() } }) {
+            zoneC.addAll(0, req.worldInfo.dynamicTriggeredEntries.map { it.toSystemMessage() })
+        }
+
+        // 动态环境感知（时间宏下沉）
+        if (presetRequiresEnvironmentTime) {
+            val formattedNow = req.now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+            zoneC += systemMessage("[Environment Context: Time=$formattedNow]")
+        }
+
         // 世界书的 at_depth 条目和预设的 in-chat prompt 走同一条插入路径。
-        worldInfo.depthEntries.forEach { entry ->
+        req.worldInfo.depthEntries.forEach { entry ->
             val content = macroResolver.render(entry.content, macroContext)
             if (content.isBlank()) return@forEach
             inChat += InChatPrompt(
@@ -198,19 +292,22 @@ object StPromptAssembler {
             )
         }
 
-        val result = messages.toMutableList()
+        val messages = (zoneA + zoneB + zoneC).toMutableList()
+        val historyStart = zoneA.size
+        val historyEnd = zoneA.size + zoneB.size
+
         insertInChat(
-            messages = result,
+            messages = messages,
             prompts = inChat,
             warnings = warnings,
-            historyStart = if (historyFound) historyStart else 0,
-            historyEnd = if (historyFound) historyEnd else result.size,
+            historyStart = historyStart,
+            historyEnd = historyEnd,
         )
 
-        var finalMessages = if (flattenSystemMessages) {
-            flattenSystemMessages(result, historyStart.coerceIn(0, result.size))
+        var finalMessages = if (req.flattenSystemMessages) {
+            flattenSystemMessages(messages, historyStart.coerceIn(0, messages.size))
         } else {
-            result.filter { it.parts.isNotEmpty() }
+            messages.filter { it.parts.isNotEmpty() }
         }
         if (preset.settings.squashSystemMessages) {
             finalMessages = squashConsecutiveSystem(finalMessages)
@@ -236,11 +333,51 @@ object StPromptAssembler {
             inChatCount = inChat.size,
             unknownMarkers = unknownMarkers.toList(),
             unresolvedMacros = macroResolver.unresolvedMacros.toList(),
-            warnings = (warnings + preset.warnings + worldInfo.warnings).distinct(),
+            warnings = (warnings + preset.warnings + req.worldInfo.warnings).distinct(),
             finalMessageCount = finalMessages.size,
         )
         return StAssemblyResult(finalMessages, report)
     }
+
+    fun assemble(
+        preset: StPreset,
+        history: List<UIMessage>,
+        character: CharacterCard? = null,
+        assistantSystemPrompt: String = "",
+        personaName: String = "",
+        personaDescription: String = "",
+        modelName: String = "",
+        generationType: StGenerationType = StGenerationType.NORMAL,
+        extraSystemPrompt: String = "",
+        worldInfo: StWorldInfoResult = StWorldInfoResult(),
+        checkpoint: ConversationCheckpointEntity? = null,
+        milestoneMessageIds: Set<String> = emptySet(),
+        variables: MutableMap<String, String> = mutableMapOf(),
+        globalVariables: MutableMap<String, String> = mutableMapOf(),
+        random: Random = Random.Default,
+        now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+        flattenSystemMessages: Boolean = false,
+    ): StAssemblyResult = assemble(
+        StAssemblyRequest(
+            preset = preset,
+            liveMessages = history,
+            character = character,
+            assistantSystemPrompt = assistantSystemPrompt,
+            personaName = personaName,
+            personaDescription = personaDescription,
+            modelName = modelName,
+            generationType = generationType,
+            extraSystemPrompt = extraSystemPrompt,
+            worldInfo = worldInfo,
+            checkpoint = checkpoint,
+            milestoneMessageIds = milestoneMessageIds,
+            variables = variables,
+            globalVariables = globalVariables,
+            random = random,
+            now = now,
+            flattenSystemMessages = flattenSystemMessages,
+        )
+    )
 
     /** 只解析 prompt_order，不组装；预设详情页用它展示发送顺序。 */
     fun orderedPrompts(preset: StPreset): List<Pair<StPrompt, StPromptOrderEntry>> {
@@ -294,12 +431,33 @@ object StPromptAssembler {
         character: CharacterCard?,
         assistantSystemPrompt: String,
     ): String {
-        // 有结构化角色卡时，main 只使用卡片的 system_prompt；assistant.systemPrompt 是旧路径的拼接结果，
-        // 再拼进来会和 charDescription / personality / scenario marker 重复。
         if (character != null && !marker.forbidOverrides) {
             return character.systemPrompt
         }
         return assistantSystemPrompt
+    }
+
+    private fun filterAfterCheckpoint(
+        messages: List<UIMessage>,
+        checkpoint: ConversationCheckpointEntity,
+    ): List<UIMessage> {
+        val boundaryIndex = messages.indexOfLast { it.id.toString() == checkpoint.boundaryNodeId }
+        return if (boundaryIndex >= 0 && boundaryIndex < messages.size - 1) {
+            messages.subList(boundaryIndex + 1, messages.size)
+        } else if (checkpoint.boundaryFloor in 1 until messages.size) {
+            messages.drop(checkpoint.boundaryFloor)
+        } else {
+            messages
+        }
+    }
+
+    private fun StPreset.hasEnabledMarker(identifier: String): Boolean {
+        val marker = prompts.firstOrNull { it.identifier == identifier } ?: return false
+        val hasOrder = promptOrder.any { it.order.isNotEmpty() }
+        if (!hasOrder) return true
+        return promptOrder.any { bucket ->
+            bucket.order.any { entry -> entry.enabled && entry.identifier == marker.identifier }
+        }
     }
 
     private fun insertInChat(
@@ -316,12 +474,8 @@ object StPromptAssembler {
         nonEmpty.groupBy { it.depth.coerceAtLeast(0) }
             .toSortedMap(compareByDescending { it })
             .forEach { (depth, group) ->
-                // 从高 injection_order 开始插入同一位置：后插入的低 order 会落在前面，
-                // 最终顺序符合 ST 的「数值小的更靠前、数值大的更靠近最新消息」。
                 var inserted = 0
                 group.sortedByDescending { it.order }.forEach { prompt ->
-                    // depth 是相对聊天历史的深度，不是相对整段组装结果；
-                    // depth=0 表示历史末尾，1 表示最后一条历史消息之前。
                     val target = (end - depth).coerceIn(start, end)
                     val index = safeInsertIndex(messages, target).coerceAtLeast(start)
                     if (index < target) {
@@ -330,7 +484,6 @@ object StPromptAssembler {
                     messages.add(index, textMessage(prompt.role, prompt.content))
                     inserted++
                 }
-                // 插入在历史区间内，历史末尾和起点要跟着后移
                 end += inserted
                 if (end - inserted <= start) start += inserted
             }
@@ -339,7 +492,6 @@ object StPromptAssembler {
     private fun textMessage(role: MessageRole, text: String): UIMessage = when (role) {
         MessageRole.ASSISTANT -> UIMessage.assistant(text)
         MessageRole.SYSTEM -> UIMessage.system(text)
-        // ST 只有 system/user/assistant；system 之外的未知角色按 user 发送
         else -> UIMessage.user(text)
     }.copy(isSynthetic = true)
 
@@ -347,7 +499,6 @@ object StPromptAssembler {
 
     private fun safeInsertIndex(messages: List<UIMessage>, target: Int): Int {
         var index = findSafeInsertIndex(messages, target)
-        // 不要拆开 assistant(tool call) -> tool result，或连续 tool result
         while (index > 0 && index < messages.size) {
             val previous = messages[index - 1]
             val current = messages[index]
@@ -380,10 +531,6 @@ object StPromptAssembler {
         return result
     }
 
-    /**
-     * 只保留一条顶层 system：历史之前的 system 全部合并到最前面，历史之后的 system 降级为 user。
-     * Claude / Gemini / Responses API 的 provider 实现只会读取第一条 system，其余会被丢弃。
-     */
     private fun flattenSystemMessages(messages: List<UIMessage>, historyStart: Int): List<UIMessage> {
         if (messages.none { it.role == MessageRole.SYSTEM }) return messages
         val split = historyStart.coerceIn(0, messages.size)
@@ -432,12 +579,6 @@ object StPromptAssembler {
         )
     }
 
-    /**
-     * 把 mes_example 拆成真实的消息对。
-     *
-     * 兼容 `<START>` 分隔和 `{{user}}:` / `{{char}}:` 前缀；识别不了的块退化为一条 system 消息，
-     * 保证示例内容不会丢。
-     */
     internal fun parseDialogueExamples(
         raw: String,
         characterName: String,

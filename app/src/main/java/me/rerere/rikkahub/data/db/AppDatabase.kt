@@ -7,6 +7,7 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import me.rerere.ai.core.TokenUsage
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
+import me.rerere.rikkahub.data.db.dao.ConversationCheckpointDao
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.FolderDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
@@ -21,6 +22,7 @@ import me.rerere.rikkahub.data.db.dao.StVariableDao
 import me.rerere.rikkahub.data.db.dao.UsageRecordDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
@@ -60,8 +62,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         UsageRecordEntity::class,
         StPresetEntity::class,
         StVariableEntity::class,
+        ConversationCheckpointEntity::class,
     ],
-    version = 35,
+    version = 36,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -120,6 +123,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun stPresetDao(): StPresetDao
 
     abstract fun stVariableDao(): StVariableDao
+
+    abstract fun conversationCheckpointDao(): ConversationCheckpointDao
 }
 
 object TokenUsageConverter {

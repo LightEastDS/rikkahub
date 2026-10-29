@@ -44,6 +44,8 @@ import me.rerere.rikkahub.data.model.MemoryFile
 import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
+import me.rerere.rikkahub.data.repository.ConversationCheckpointRepository
 import me.rerere.rikkahub.data.repository.StPresetRepository
 import me.rerere.rikkahub.data.repository.StVariableRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
@@ -79,6 +81,8 @@ class ChatTurnContext(
     val tools: List<Tool>,
     /** 非空时聊天请求走 ST 预设组装器；为 null 时完全沿用旧路径。 */
     val stPreset: StPreset? = null,
+    val checkpoint: ConversationCheckpointEntity? = null,
+    val milestoneMessageIds: Set<String> = emptySet(),
 )
 
 /** 把会话变成发给模型的请求：系统提示词、上下文裁剪、输入输出转换都在这里 */
@@ -92,6 +96,7 @@ class ChatRequestFactory(
     private val workspaceRepository: WorkspaceRepository,
     private val stPresetRepository: StPresetRepository,
     private val stVariableRepository: StVariableRepository,
+    private val checkpointRepository: ConversationCheckpointRepository,
 ) {
     private val inputTransformers: List<InputMessageTransformer> = listOf(
         TimeReminderTransformer,
@@ -132,6 +137,19 @@ class ChatRequestFactory(
         if (assistant.stPresetId != null && stPreset == null) {
             Log.w(TAG, "ST preset ${assistant.stPresetId} is missing or disabled; falling back to legacy prompts")
         }
+        val checkpoint = if (stPreset != null) {
+            checkpointRepository.getLatest(conversation.id)
+        } else {
+            null
+        }
+        val milestoneMessageIds = if (stPreset != null) {
+            conversation.messageNodes
+                .filter { it.isFavorite }
+                .map { it.currentMessage.id.toString() }
+                .toSet()
+        } else {
+            emptySet()
+        }
         return ChatTurnContext(
             settings = settings,
             assistant = assistant,
@@ -148,6 +166,8 @@ class ChatRequestFactory(
                 workspaceCwd = conversation.workspaceCwd,
             ),
             stPreset = stPreset,
+            checkpoint = checkpoint,
+            milestoneMessageIds = milestoneMessageIds,
         )
     }
 
@@ -320,7 +340,10 @@ class ChatRequestFactory(
             )
 
         val scopeId = turn.conversationId.toString()
-        val variables = stVariableRepository.load(scopeId)
+        val presetScopeId = preset.id.toString()
+        val presetVariables = stVariableRepository.load(presetScopeId)
+        val conversationVariables = stVariableRepository.load(scopeId)
+        val variables = (presetVariables + conversationVariables).toMutableMap()
         val globalVariables = stVariableRepository.loadGlobal()
         val character = assistant.characterCard
         val personaName = turn.settings.displaySetting.userNickname
@@ -392,6 +415,8 @@ class ChatRequestFactory(
             generationType = generationType,
             extraSystemPrompt = extraSystem,
             worldInfo = worldInfo,
+            checkpoint = turn.checkpoint,
+            milestoneMessageIds = turn.milestoneMessageIds,
             variables = variables,
             globalVariables = globalVariables,
             flattenSystemMessages = flattenSystemMessages,

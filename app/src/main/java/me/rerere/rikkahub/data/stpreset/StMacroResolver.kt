@@ -44,19 +44,19 @@ class StMacroResolver(
     private val _unresolved = linkedSetOf<String>()
     val unresolvedMacros: Set<String> get() = _unresolved
 
-    private val setVarRegex = Regex("""^\s*setvar::([^:]+)::([\s\S]*)$""", RegexOption.IGNORE_CASE)
-    private val getVarRegex = Regex("""^\s*getvar::([^}]+)$""", RegexOption.IGNORE_CASE)
-    private val setGlobalVarRegex = Regex("""^\s*setglobalvar::([^:]+)::([\s\S]*)$""", RegexOption.IGNORE_CASE)
-    private val getGlobalVarRegex = Regex("""^\s*getglobalvar::([^}]+)$""", RegexOption.IGNORE_CASE)
-    private val hasVarRegex = Regex("""^\s*hasvar::([^}]+)$""", RegexOption.IGNORE_CASE)
-    private val deleteVarRegex = Regex("""^\s*deletevar::([^}]+)$""", RegexOption.IGNORE_CASE)
+    private val setVarRegex = Regex("""^\s*setvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+    private val getVarRegex = Regex("""^\s*(?:getvar|var)(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
+    private val setGlobalVarRegex = Regex("""^\s*setglobalvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+    private val getGlobalVarRegex = Regex("""^\s*(?:getglobalvar|globalvar)(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
+    private val hasVarRegex = Regex("""^\s*hasvar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
+    private val deleteVarRegex = Regex("""^\s*deletevar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
     private val randomRegex = Regex("""^\s*(random|pick)(?:::|:)([\s\S]*)$""", RegexOption.IGNORE_CASE)
     private val rollRegex = Regex("""^\s*roll(?:::|:)\s*([\s\S]*)$""", RegexOption.IGNORE_CASE)
     private val diceRegex = Regex("""^\s*(\d*)d(\d+)\s*([+-]\s*\d+)?\s*$""", RegexOption.IGNORE_CASE)
 
     fun render(text: String, context: StMacroContext): String {
         if (text.isEmpty() || !text.contains("{{")) return text
-        var result = text
+        var result = processConditionals(text, context)
         // 变量值里可能继续引用宏；多轮展开，直到稳定。上限防止自引用死循环。
         repeat(8) {
             val next = replaceOnce(result, context)
@@ -64,6 +64,76 @@ class StMacroResolver(
             result = next
         }
         return result
+    }
+
+    private fun processConditionals(text: String, context: StMacroContext): String {
+        var output = text
+        repeat(6) {
+            var changed = false
+            val ifIdx = output.indexOf("{{#if", ignoreCase = true)
+            if (ifIdx >= 0) {
+                val headerEnd = findMacroEnd(output, ifIdx)
+                if (headerEnd >= 0) {
+                    val conditionExpr = output.substring(ifIdx + 5, headerEnd).trim()
+                    val closeTag = "{{/if}}"
+                    val closeIdx = findMatchingCloseTag(output, headerEnd + 2, "{{#if", closeTag)
+                    if (closeIdx >= 0) {
+                        val innerBody = output.substring(headerEnd + 2, closeIdx)
+                        val eval = render(conditionExpr, context).trim()
+                        val replacement = if (eval.isNotEmpty() && eval != "0" && !eval.equals("false", ignoreCase = true)) {
+                            innerBody
+                        } else {
+                            ""
+                        }
+                        output = output.substring(0, ifIdx) + replacement + output.substring(closeIdx + closeTag.length)
+                        changed = true
+                    }
+                }
+            }
+
+            val unlessIdx = output.indexOf("{{#unless", ignoreCase = true)
+            if (unlessIdx >= 0) {
+                val headerEnd = findMacroEnd(output, unlessIdx)
+                if (headerEnd >= 0) {
+                    val conditionExpr = output.substring(unlessIdx + 9, headerEnd).trim()
+                    val closeTag = "{{/unless}}"
+                    val closeIdx = findMatchingCloseTag(output, headerEnd + 2, "{{#unless", closeTag)
+                    if (closeIdx >= 0) {
+                        val innerBody = output.substring(headerEnd + 2, closeIdx)
+                        val eval = render(conditionExpr, context).trim()
+                        val replacement = if (eval.isEmpty() || eval == "0" || eval.equals("false", ignoreCase = true)) {
+                            innerBody
+                        } else {
+                            ""
+                        }
+                        output = output.substring(0, unlessIdx) + replacement + output.substring(closeIdx + closeTag.length)
+                        changed = true
+                    }
+                }
+            }
+
+            if (!changed) return output
+        }
+        return output
+    }
+
+    private fun findMatchingCloseTag(text: String, startFrom: Int, openTag: String, closeTag: String): Int {
+        var depth = 1
+        var cursor = startFrom
+        while (cursor < text.length) {
+            val nextOpen = text.indexOf(openTag, cursor, ignoreCase = true)
+            val nextClose = text.indexOf(closeTag, cursor, ignoreCase = true)
+            if (nextClose < 0) return -1
+            if (nextOpen in 0 until nextClose) {
+                depth++
+                cursor = nextOpen + openTag.length
+            } else {
+                depth--
+                if (depth == 0) return nextClose
+                cursor = nextClose + closeTag.length
+            }
+        }
+        return -1
     }
 
     private fun replaceOnce(text: String, context: StMacroContext): String {
@@ -196,5 +266,90 @@ class StMacroResolver(
         var total = modifier
         repeat(count) { total += random.nextInt(1, sides + 1) }
         return total.toString()
+    }
+
+    companion object {
+        private val setVarDeclarationRegex = Regex("""^\s*setvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+
+        /**
+         * Pass 1: 扫描所有启用的条目，提前提取 setvar 默认值并展开拓扑依赖
+         */
+        fun preScanVariables(
+            prompts: List<StPrompt>,
+            persistedVariables: Map<String, String> = emptyMap(),
+            context: StMacroContext = StMacroContext(),
+            random: Random = Random.Default,
+            now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+        ): MutableMap<String, String> {
+            val vars = persistedVariables.toMutableMap()
+
+            // 1. 抽取所有条目里的静态声明
+            prompts.forEach { prompt ->
+                if (prompt.content.contains("setvar", ignoreCase = true)) {
+                    extractSetVars(prompt.content).forEach { (key, rawVal) ->
+                        // 会话已存的用户自定义变量优先；不存在才采用预设默认值
+                        if (!vars.containsKey(key)) {
+                            vars[key] = rawVal
+                        }
+                    }
+                }
+            }
+
+            // 2. 拓扑迭代展开（处理 {{setvar::A::{{getvar::B}}}} 这种嵌套依赖，最多 6 轮防死循环）
+            val resolver = StMacroResolver(variables = vars, random = random, now = now)
+            repeat(6) {
+                var changed = false
+                vars.keys.toList().forEach { k ->
+                    val oldVal = vars[k] ?: ""
+                    val newVal = resolver.render(oldVal, context)
+                    if (newVal != oldVal) {
+                        vars[k] = newVal
+                        changed = true
+                    }
+                }
+                if (!changed) return@repeat
+            }
+            return vars
+        }
+
+        private fun extractSetVars(text: String): List<Pair<String, String>> {
+            val result = mutableListOf<Pair<String, String>>()
+            var cursor = 0
+            while (cursor < text.length) {
+                val start = text.indexOf("{{", cursor)
+                if (start < 0) break
+                val end = findMacroEndStatic(text, start)
+                if (end < 0) break
+                val expression = text.substring(start + 2, end).trim()
+                val match = setVarDeclarationRegex.find(expression)
+                if (match != null) {
+                    val key = match.groupValues[1].trim()
+                    val rawVal = match.groupValues[2].trim()
+                    result.add(key to rawVal)
+                }
+                cursor = end + 2
+            }
+            return result
+        }
+
+        private fun findMacroEndStatic(text: String, start: Int): Int {
+            var depth = 1
+            var index = start + 2
+            while (index < text.length - 1) {
+                if (text[index] == '{' && text[index + 1] == '{') {
+                    depth++
+                    index += 2
+                    continue
+                }
+                if (text[index] == '}' && text[index + 1] == '}') {
+                    depth--
+                    if (depth == 0) return index
+                    index += 2
+                    continue
+                }
+                index++
+            }
+            return -1
+        }
     }
 }

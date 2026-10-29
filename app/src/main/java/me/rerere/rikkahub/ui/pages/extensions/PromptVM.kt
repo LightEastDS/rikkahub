@@ -12,12 +12,14 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.repository.StPresetRepository
 import me.rerere.rikkahub.data.repository.StPresetRecord
+import me.rerere.rikkahub.data.repository.StVariableRepository
 import me.rerere.rikkahub.data.stpreset.StPresetImportReport
 import kotlin.uuid.Uuid
 
 class PromptVM(
     private val settingsStore: SettingsStore,
     private val stPresetRepository: StPresetRepository,
+    private val stVariableRepository: StVariableRepository,
 ) : ViewModel() {
     val settings = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
@@ -84,4 +86,16 @@ class PromptVM(
     }
 
     suspend fun stPresetRawJson(id: Uuid): String? = stPresetRepository.rawJson(id)
+
+    suspend fun getVariables(scopeId: String): Map<String, String> {
+        return withContext(Dispatchers.IO) {
+            stVariableRepository.load(scopeId)
+        }
+    }
+
+    fun saveVariables(scopeId: String, variables: Map<String, String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            stVariableRepository.save(scopeId, variables)
+        }
+    }
 }

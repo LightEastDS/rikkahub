@@ -138,6 +138,10 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().conversationCheckpointDao()
+    }
+
+    single {
         UsageRecorder(dao = get(), scope = get<AppScope>())
     }
 

@@ -75,6 +75,8 @@ import me.rerere.rikkahub.data.model.withToolApproval
 import me.rerere.rikkahub.data.model.withTranslation
 import me.rerere.rikkahub.data.model.withoutConversationFields
 import me.rerere.rikkahub.data.model.withoutUnresumableToolCalls
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
+import me.rerere.rikkahub.data.repository.ConversationCheckpointRepository
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.data.stpreset.StGenerationType
@@ -108,6 +110,14 @@ data class HideCommandResult(
     val affectedNodesCount: Int = 0,
 )
 
+data class CompactCommandResult(
+    val success: Boolean,
+    val message: String,
+    val boundaryFloor: Int = 0,
+    val originalTokens: Int = 0,
+    val compressedTokens: Int = 0,
+)
+
 class ChatService(
     private val context: Application,
     private val appScope: AppScope,
@@ -121,6 +131,7 @@ class ChatService(
     val mcpManager: McpManager,
     private val filesManager: FilesManager,
     private val folderRepository: FolderRepository,
+    private val checkpointRepository: ConversationCheckpointRepository,
 ) {
     /** 一轮生成的结果 */
     private sealed interface TurnResult {
@@ -389,6 +400,12 @@ class ChatService(
         if (commandText != null && isHideCommand(commandText)) {
             appScope.launch {
                 executeHideCommand(conversationId, commandText)
+            }
+            return
+        }
+        if (commandText != null && isCompactCommand(commandText)) {
+            appScope.launch {
+                executeCompactCommand(conversationId, commandText)
             }
             return
         }
@@ -1364,10 +1381,119 @@ class ChatService(
 
     companion object {
         private val HIDE_CMD_REGEX = Regex("""^/(hide|unhide|show)\b(.*)$""", RegexOption.IGNORE_CASE)
+        private val COMPACT_CMD_REGEX = Regex("""^/compact\b(.*)$""", RegexOption.IGNORE_CASE)
         private val RANGE_TOKEN_REGEX = Regex("""(\d+)(?:\s*-\s*(\d+))?""")
 
         fun isHideCommand(text: String): Boolean {
             return HIDE_CMD_REGEX.matches(text.trim())
         }
+
+        fun isCompactCommand(text: String): Boolean {
+            return COMPACT_CMD_REGEX.matches(text.trim())
+        }
+    }
+
+    suspend fun executeCompactCommand(conversationId: Uuid, commandText: String): CompactCommandResult {
+        val trimmed = commandText.trim()
+        val match = COMPACT_CMD_REGEX.matchEntire(trimmed)
+            ?: return CompactCommandResult(false, "无效指令")
+
+        val session = sessionManager.getOrCreate(conversationId)
+        if (session.isGenerating) {
+            return CompactCommandResult(false, "正在生成中，无法压缩")
+        }
+
+        val conversation = session.state.value
+        val nodes = conversation.messageNodes
+        if (nodes.isEmpty()) {
+            return CompactCommandResult(false, "没有可压缩的对话记录")
+        }
+
+        val args = match.groupValues[1].trim()
+        val targetFloorArg = args.toIntOrNull()
+        val boundaryFloor = targetFloorArg ?: nodes.size
+
+        if (boundaryFloor <= 0 || boundaryFloor > nodes.size) {
+            return CompactCommandResult(false, "指定楼层不存在（当前会话共 ${nodes.size} 层）")
+        }
+
+        val settings = settingsStore.awaitLoaded()
+        val turn = requestFactory.createContext(settings, conversation)
+
+        // 非 ST 预设助手：严格保留原生方案
+        if (turn.stPreset == null) {
+            val result = compressConversation(conversationId, "")
+            return if (result.isSuccess) {
+                CompactCommandResult(true, "已压缩对话历史", boundaryFloor = boundaryFloor)
+            } else {
+                CompactCommandResult(false, result.exceptionOrNull()?.message ?: "压缩失败")
+            }
+        }
+
+        // ST 预设助手：四段结构化压缩与检查点
+        val candidateNodes = nodes.take(boundaryFloor)
+        // 压缩前降噪（Pre-compaction Pruning）：过滤被隐藏的消息
+        val nonHiddenNodes = candidateNodes.filterNot { it.currentMessage.isHidden }
+        val messagesToSummarize = nonHiddenNodes.map { it.currentMessage }
+        if (messagesToSummarize.isEmpty()) {
+            return CompactCommandResult(false, "压缩区间内所有消息已被隐藏，无可压缩内容")
+        }
+
+        val boundaryNode = candidateNodes.last()
+        val boundaryNodeId = boundaryNode.id.toString()
+
+        return runCatching {
+            val originalTokens = messagesToSummarize.sumOf { (it.toText().length * 0.75).toInt().coerceAtLeast(1) }
+            val summary = requestFactory.generateCompressionSummary(
+                turn = turn,
+                messages = messagesToSummarize,
+                compressPrompt = ST_COMPACT_PROMPT,
+            )
+            val compressedTokens = (summary.length * 0.75).toInt().coerceAtLeast(1)
+
+            val checkpoint = ConversationCheckpointEntity(
+                conversationId = conversationId.toString(),
+                boundaryNodeId = boundaryNodeId,
+                boundaryFloor = boundaryFloor,
+                summaryContent = summary,
+                originalTokens = originalTokens,
+                compressedTokens = compressedTokens,
+                createdAt = System.currentTimeMillis(),
+            )
+            checkpointRepository.saveCheckpoint(checkpoint)
+
+            val origStr = if (originalTokens >= 1000) "${originalTokens / 1000}K" else "$originalTokens"
+            val compStr = if (compressedTokens >= 1000) "${compressedTokens / 1000}K" else "$compressedTokens"
+            CompactCommandResult(
+                success = true,
+                message = "早期对话已压缩为背景记忆 ($origStr → $compStr，已压缩 $boundaryFloor 轮)",
+                boundaryFloor = boundaryFloor,
+                originalTokens = originalTokens,
+                compressedTokens = compressedTokens,
+            )
+        }.getOrElse { error ->
+            Log.e(TAG, "Failed to compact conversation", error)
+            CompactCommandResult(false, error.message ?: "压缩失败")
+        }
     }
 }
+
+private const val ST_COMPACT_PROMPT = """你是一个专业的小说与角色扮演上下文总结引擎。
+请将以下历史对话记录进行高度凝练的结构化总结，目标是将冗长的对话压缩为高密度、保留全部核心事实的大纲。
+
+输出必须严格按照以下四个结构化区块输出，不要任何多余前言：
+<timeline_events>
+[核心剧情事件推进线：按时间顺序记载发生了什么、谁做出了什么关键动作]
+</timeline_events>
+
+<character_relationships>
+[角色关系与状态变动：态度变化、羁绊建立、当前角色的物理状态与位置]
+</character_relationships>
+
+<agreements_and_promises>
+[关键承诺与契约：彼此达成的协定、获得的物品/线索、既成事实]
+</agreements_and_promises>
+
+<open_threads>
+[未完待续与伏笔：正在进行的目标、尚未解决的危机、悬而未决的问题]
+</open_threads>"""

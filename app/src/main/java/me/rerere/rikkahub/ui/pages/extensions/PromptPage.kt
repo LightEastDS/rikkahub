@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +61,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,6 +111,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.repository.StPresetRecord
+import me.rerere.rikkahub.data.stpreset.StMacroResolver
 import me.rerere.rikkahub.data.stpreset.StPromptAssembler
 import me.rerere.rikkahub.data.stpreset.StPromptRow
 import me.rerere.rikkahub.data.stpreset.StPresetMarkers
@@ -1449,6 +1452,9 @@ private fun StPresetTab(
             onUpdatePrompt = { identifier, name, role, content ->
                 vm.updateStPrompt(record.preset.id, identifier, name, content, role)
             },
+            onLoadVariables = { vm.getVariables(it) },
+            onSaveVariables = { scopeId, vars -> vm.saveVariables(scopeId, vars)
+            },
         )
     }
 }
@@ -1563,6 +1569,8 @@ private fun StPresetEditSheet(
     onMovePrompt: (orderIndex: Int, delta: Int) -> Unit,
     onResetPreset: () -> Unit,
     onUpdatePrompt: (identifier: String, name: String, role: MessageRole, content: String) -> Unit,
+    onLoadVariables: suspend (String) -> Map<String, String> = { emptyMap() },
+    onSaveVariables: (String, Map<String, String>) -> Unit = { _, _ -> },
 ) {
     val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.Hidden,
@@ -1575,6 +1583,13 @@ private fun StPresetEditSheet(
     val detachedRows = rows.filter { it.orderIndex == null }
     var showInspect by remember { mutableStateOf(false) }
     var editingRow by remember { mutableStateOf<StPromptRow?>(null) }
+    val declaredVariables = remember(preset) {
+        StMacroResolver.preScanVariables(preset.prompts)
+    }
+    var userVariables by remember(preset.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(preset.id) {
+        userVariables = onLoadVariables(preset.id.toString())
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1671,6 +1686,25 @@ private fun StPresetEditSheet(
                             }
                         }
                     }
+                }
+
+                item {
+                    StPresetVariablesCard(
+                        declaredVariables = declaredVariables,
+                        userVariables = userVariables,
+                        onUpdateVariable = { key, value ->
+                            val updated = userVariables.toMutableMap()
+                            updated[key] = value
+                            userVariables = updated
+                            onSaveVariables(preset.id.toString(), updated)
+                        },
+                        onResetVariable = { key ->
+                            val updated = userVariables.toMutableMap()
+                            updated.remove(key)
+                            userVariables = updated
+                            onSaveVariables(preset.id.toString(), updated)
+                        },
+                    )
                 }
 
                 if (preset.warnings.isNotEmpty()) {
@@ -2086,4 +2120,114 @@ private fun StPromptEditDialog(
             }
         },
     )
+}
+
+
+@Composable
+private fun StPresetVariablesCard(
+    declaredVariables: Map<String, String>,
+    userVariables: Map<String, String>,
+    onUpdateVariable: (String, String) -> Unit,
+    onResetVariable: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isExpanded by rememberSaveable { mutableStateOf(declaredVariables.isNotEmpty()) }
+    val allKeys = remember(declaredVariables, userVariables) {
+        (declaredVariables.keys + userVariables.keys).toList().sorted()
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        HugeIcons.MagicWand01,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = "预设参数配置 (Variables)",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    if (allKeys.isNotEmpty()) {
+                        Tag(type = TagType.INFO) {
+                            Text("${allKeys.size}")
+                        }
+                    }
+                }
+                Text(
+                    text = if (isExpanded) "折叠" else "展开",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                if (allKeys.isEmpty()) {
+                    Text(
+                        text = "预设中未检测到静态变量声明（如 {{setvar::key::value}}）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    ) {
+                        allKeys.forEach { key ->
+                            val defaultVal = declaredVariables[key].orEmpty()
+                            val currentVal = userVariables[key] ?: defaultVal
+                            val isOverridden = userVariables.containsKey(key) && userVariables[key] != declaredVariables[key]
+
+                            OutlinedTextField(
+                                value = currentVal,
+                                onValueChange = { onUpdateVariable(key, it) },
+                                label = { Text(key) },
+                                modifier = Modifier.fillMaxWidth(),
+                                trailingIcon = {
+                                    if (isOverridden) {
+                                        IconButton(
+                                            onClick = { onResetVariable(key) },
+                                        ) {
+                                            Icon(
+                                                HugeIcons.Refresh01,
+                                                contentDescription = "恢复预设默认值",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                },
+                                supportingText = if (defaultVal.isNotEmpty()) {
+                                    { Text("默认值: $defaultVal", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                } else null,
+                                singleLine = true,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
