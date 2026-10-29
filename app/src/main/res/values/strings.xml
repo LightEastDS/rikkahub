@@ -1799,7 +1799,7 @@
   <string name="prompt_page_st_preset_bind">SillyTavern preset</string>
   <string name="prompt_page_st_preset_bind_none">None</string>
   <string name="prompt_page_st_preset_bind_desc">When bound, prompts are assembled from prompt_order with markers and in-chat depth.</string>
-  <string name="prompt_page_st_preset_inspect">Inspect assembled messages</string>
+  <string name="prompt_page_st_preset_inspect">Inspect Assembly</string>
   <string name="prompt_page_st_preset_inspect_desc">Preview the final role/content list with a sample chat and the first assistant bound to this preset.</string>
   <string name="prompt_page_st_preset_inspect_summary">%1$d prompts · %2$d messages · %3$d warnings</string>
   <string name="prompt_page_st_preset_inspect_empty">No messages assembled.</string>

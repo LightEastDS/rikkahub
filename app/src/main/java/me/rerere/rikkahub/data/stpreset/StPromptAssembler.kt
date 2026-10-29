@@ -59,7 +59,7 @@ object StPromptAssembler {
     )
 
     private val DYNAMIC_MACRO_REGEX = Regex(
-        """\{\{\s*(time|cur_time|datetime|cur_date|date|isotime|isodate|weekday|input|lastmessage|last_message|random|pick|roll)\b""",
+        """\{\{\s*(time|cur_time|datetime|cur_date|date|isotime|isodate|weekday|input|lastmessage|last_message|lastmessageid|last_message_id|chat_id|message_id|idle_duration|random|pick|roll)\b""",
         RegexOption.IGNORE_CASE
     )
 
@@ -69,9 +69,9 @@ object StPromptAssembler {
 
     /**
      * 对 prompt_order 进行 DeepSeek 极速前缀缓存友好的自动拓扑排序：
-     * 1. Zone A（静态前缀区）：静态 marker（main, worldInfoBefore, charDescription, charPersonality, personaDescription, scenario, dialogueExamples）以及静态系统提示词（SYSTEM 角色且不含动态宏）置顶；
+     * 1. Zone A（静态前缀区）：所有固定不变的内容（包括静态 marker 如 main, worldInfoBefore, charDescription 等，以及所有不含每轮变动动态宏的文本条目，不论原本在预设中的位置或其角色是 SYSTEM、USER 还是 ASSISTANT）统一置顶在对话历史之前；
      * 2. Zone B（稳定历史区）：chatHistory 提示词放置在静态前缀之后；
-     * 3. Zone C（动态后缀区）：worldInfoAfter、含有时间/日期/输入/随机宏的提示词、以及置于历史之后的非 SYSTEM 提示词沉底。
+     * 3. Zone C（动态后缀区）：每轮对话都变的内容（worldInfoAfter 动态世界书、含有时间/日期/输入/随机宏的提示词、In-Chat 深度注入提示词等）沉底在最后。
      *
      * 保持各分区内部条目原本的相对顺序。
      */
@@ -81,7 +81,6 @@ object StPromptAssembler {
         val zoneB = mutableListOf<StPromptOrderEntry>()
         val zoneC = mutableListOf<StPromptOrderEntry>()
 
-        var passedHistory = false
         order.forEach { entry ->
             val prompt = promptMap[entry.identifier]
             if (prompt == null) {
@@ -90,22 +89,17 @@ object StPromptAssembler {
             }
             if (prompt.marker) {
                 when (prompt.identifier) {
-                    "chatHistory" -> {
-                        zoneB += entry
-                        passedHistory = true
-                    }
+                    "chatHistory" -> zoneB += entry
                     "worldInfoAfter" -> zoneC += entry
-                    in STATIC_MARKERS -> zoneA += entry
-                    else -> if (passedHistory) zoneC += entry else zoneA += entry
+                    else -> zoneA += entry
                 }
-            } else if (prompt.isInChat) {
+            } else if (prompt.isInChat || isDynamicContent(prompt.content)) {
+                // 每轮变动的内容（深度注入、动态时间宏、用户输入宏、随机宏等）沉底到 Zone C
                 zoneC += entry
-            } else if (isDynamicContent(prompt.content)) {
-                zoneC += entry
-            } else if (prompt.role == MessageRole.SYSTEM) {
-                zoneA += entry
             } else {
-                if (passedHistory) zoneC += entry else zoneA += entry
+                // 所有固定不变的文本条目（无论预设作者原本放置在何处，无论 SYSTEM、USER 还是 ASSISTANT 角色），
+                // 均置顶到 Zone A（对话历史之前），保证最大化缓存命中
+                zoneA += entry
             }
         }
 
@@ -309,36 +303,29 @@ object StPromptAssembler {
             historyFound = true
         }
 
-        var inPostHistory = false
+        var historyMarkerFound = false
         nodes.forEach { node ->
             when (node) {
                 is Node.Text -> {
                     if (node.isDynamic) {
                         zoneC += node.message
-                    } else if (node.role == MessageRole.SYSTEM) {
-                        // 静态系统提示词始终置于 Zone A 静态前缀区，保证 100% 缓存命中
-                        zoneA += node.message
                     } else {
-                        if (inPostHistory) {
-                            zoneC += node.message
-                        } else {
-                            zoneA += node.message
-                        }
+                        // 所有固定不变的文本条目（无论 SYSTEM、USER 还是 ASSISTANT 角色），
+                        // 始终置于 Zone A 静态前缀区（在历史之前），保证最大化缓存命中
+                        zoneA += node.message
                     }
                 }
                 is Node.Marker -> {
-                    if (node.identifier == "chatHistory") {
-                        inPostHistory = true
-                    } else if (node.identifier in STATIC_MARKERS) {
-                        // 静态设定 marker（main/charDesc/scenario/examples等）始终进入 Zone A
-                        resolveMarker(node.identifier, node.prompt, zoneA)
-                    } else if (node.identifier == "worldInfoAfter") {
-                        // 动态触发世界书始终进入 Zone C
-                        resolveMarker(node.identifier, node.prompt, zoneC)
-                    } else {
-                        if (inPostHistory) {
+                    when (node.identifier) {
+                        "chatHistory" -> {
+                            historyMarkerFound = true
+                        }
+                        "worldInfoAfter" -> {
+                            // 动态触发世界书始终进入 Zone C
                             resolveMarker(node.identifier, node.prompt, zoneC)
-                        } else {
+                        }
+                        else -> {
+                            // 所有静态 marker 始终进入 Zone A
                             resolveMarker(node.identifier, node.prompt, zoneA)
                         }
                     }
@@ -349,7 +336,7 @@ object StPromptAssembler {
         // Zone B: 填充历史会话流
         populateZoneB()
 
-        if (!inPostHistory && req.liveMessages.isNotEmpty()) {
+        if (!historyMarkerFound && req.liveMessages.isNotEmpty()) {
             warnings += "预设没有启用 chatHistory marker，聊天记录已追加到提示词末尾"
         }
 

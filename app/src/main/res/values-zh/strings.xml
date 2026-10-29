@@ -1801,7 +1801,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="prompt_page_st_preset_bind">SillyTavern 预设</string>
   <string name="prompt_page_st_preset_bind_none">不绑定</string>
   <string name="prompt_page_st_preset_bind_desc">绑定后按 prompt_order、marker 和 In-Chat 深度组装提示词。</string>
-  <string name="prompt_page_st_preset_inspect">查看组装结果（Inspect）</string>
+  <string name="prompt_page_st_preset_inspect">查看组装</string>
   <string name="prompt_page_st_preset_inspect_desc">用一段示例对话和第一个绑定该预设的助手，预览最终发送给模型的 role/content。</string>
   <string name="prompt_page_st_preset_inspect_summary">%1$d 条提示 · %2$d 条消息 · %3$d 个警告</string>
   <string name="prompt_page_st_preset_inspect_empty">没有组装出消息。</string>

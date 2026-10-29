@@ -1668,29 +1668,52 @@ private fun StPresetEditSheet(
                 }
 
                 item {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilledTonalButton(
-                            onClick = { showInspect = true },
-                            modifier = Modifier.weight(1f),
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(HugeIcons.View, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_st_preset_inspect))
-                        }
-                        OutlinedButton(onClick = onOptimizeOrder) {
-                            Icon(HugeIcons.Sorting01, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_st_preset_optimize_order))
+                            FilledTonalButton(
+                                onClick = { showInspect = true },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(HugeIcons.View, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.size(8.dp))
+                                Text(
+                                    text = stringResource(R.string.prompt_page_st_preset_inspect),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onOptimizeOrder,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(HugeIcons.Sorting01, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.size(8.dp))
+                                Text(
+                                    text = stringResource(R.string.prompt_page_st_preset_optimize_order),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                         if (record.isModified) {
-                            OutlinedButton(onClick = onResetPreset) {
+                            OutlinedButton(
+                                onClick = onResetPreset,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
                                 Icon(HugeIcons.Refresh01, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(8.dp))
-                                Text(stringResource(R.string.prompt_page_st_preset_restore_default))
+                                Text(
+                                    text = stringResource(R.string.prompt_page_st_preset_restore_default),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
@@ -1995,9 +2018,9 @@ private fun StPromptEditRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Tag(type = TagType.DEFAULT) { Text(prompt.role.name.lowercase()) }
                     if (prompt.marker) {
@@ -2018,41 +2041,41 @@ private fun StPromptEditRow(
                     }
                 }
             }
-            if (!notApplicable) {
+            if (row.orderIndex != null) {
                 Switch(
                     checked = protected || row.enabled,
                     onCheckedChange = if (protected) null else onToggle,
                 )
-                ItemActionMenu(
-                    actions = buildList {
+            }
+            ItemActionMenu(
+                actions = buildList {
+                    add(
+                        ItemAction(
+                            text = stringResource(R.string.prompt_page_st_preset_edit),
+                            icon = HugeIcons.Edit01,
+                            onClick = onEdit,
+                        )
+                    )
+                    if (canMoveUp) {
                         add(
                             ItemAction(
-                                text = stringResource(R.string.prompt_page_st_preset_edit),
-                                icon = HugeIcons.Edit01,
-                                onClick = onEdit,
+                                text = stringResource(R.string.prompt_page_st_preset_move_up),
+                                icon = HugeIcons.ArrowUp01,
+                                onClick = onMoveUp,
                             )
                         )
-                        if (canMoveUp) {
-                            add(
-                                ItemAction(
-                                    text = stringResource(R.string.prompt_page_st_preset_move_up),
-                                    icon = HugeIcons.ArrowUp01,
-                                    onClick = onMoveUp,
-                                )
-                            )
-                        }
-                        if (canMoveDown) {
-                            add(
-                                ItemAction(
-                                    text = stringResource(R.string.prompt_page_st_preset_move_down),
-                                    icon = HugeIcons.ArrowDown01,
-                                    onClick = onMoveDown,
-                                )
-                            )
-                        }
                     }
-                )
-            }
+                    if (canMoveDown) {
+                        add(
+                            ItemAction(
+                                text = stringResource(R.string.prompt_page_st_preset_move_down),
+                                icon = HugeIcons.ArrowDown01,
+                                onClick = onMoveDown,
+                            )
+                        )
+                    }
+                }
+            )
         }
     }
 }
@@ -2163,6 +2186,7 @@ private fun StPresetVariablesCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Row(
+                    modifier = Modifier.weight(1f, fill = false),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -2175,6 +2199,8 @@ private fun StPresetVariablesCard(
                     Text(
                         text = "预设参数配置 (Variables)",
                         style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     if (allKeys.isNotEmpty()) {
                         Tag(type = TagType.INFO) {
@@ -2182,6 +2208,7 @@ private fun StPresetVariablesCard(
                         }
                     }
                 }
+                Spacer(Modifier.size(8.dp))
                 Text(
                     text = if (isExpanded) "折叠" else "展开",
                     style = MaterialTheme.typography.labelMedium,

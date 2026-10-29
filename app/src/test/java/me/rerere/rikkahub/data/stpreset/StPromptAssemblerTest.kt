@@ -62,7 +62,7 @@ class StPromptAssemblerTest {
             personaName = "Bob",
         )
         assertEquals(
-            listOf("MAIN", "PRE Alice", "u1", "IN", "a1", "POST"),
+            listOf("MAIN", "PRE Alice", "POST", "u1", "IN", "a1"),
             result.messages.map { it.toText() },
         )
         assertEquals(1, result.report.inChatCount)
@@ -362,7 +362,7 @@ class StPromptAssemblerTest {
     }
 
     @Test
-    fun `static markers and static system prompts placed after chatHistory are hoisted to Zone A before history`() {
+    fun `static markers and all static prompts placed after chatHistory are hoisted to Zone A before history`() {
         val preset = preset(
             prompts = listOf(
                 p("main", marker = true),
@@ -404,7 +404,7 @@ class StPromptAssemblerTest {
         )
         val texts = result.messages.map { it.toText() }
 
-        // Zone A: All static definitions hoisted BEFORE history
+        // Zone A: All static definitions (markers, system prompts, user prompts without dynamic macros) hoisted BEFORE history
         assertEquals("MAIN_PROMPT", texts[0])
         assertEquals("DESC", texts[1])
         assertEquals("PERS", texts[2])
@@ -412,14 +412,14 @@ class StPromptAssemblerTest {
         assertEquals("hi", texts[4])
         assertEquals("hello", texts[5])
         assertEquals("Follow formatting rules", texts[6])
+        assertEquals("Please continue", texts[7])
 
         // Zone B: Chat History
-        assertEquals("u1", texts[7])
-        assertEquals("a1", texts[8])
+        assertEquals("u1", texts[8])
+        assertEquals("a1", texts[9])
 
-        // Zone C: Dynamic items & post-history user prompt
-        assertTrue(texts.drop(9).any { it.contains("Time is") })
-        assertTrue(texts.drop(9).contains("Please continue"))
+        // Zone C: Dynamic items (time macro)
+        assertTrue(texts.drop(10).any { it.contains("Time is") })
     }
 
     @Test
@@ -445,7 +445,7 @@ class StPromptAssemblerTest {
         val optimized = StPromptAssembler.optimizeOrder(prompts, order)
         val identifiers = optimized.map { it.identifier }
         assertEquals(
-            listOf("main", "charDescription", "jailbreak", "chatHistory", "worldInfoAfter", "timePrompt", "userReminder"),
+            listOf("main", "charDescription", "jailbreak", "userReminder", "chatHistory", "worldInfoAfter", "timePrompt"),
             identifiers,
         )
     }
