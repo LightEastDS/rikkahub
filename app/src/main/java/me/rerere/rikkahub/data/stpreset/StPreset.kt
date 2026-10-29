@@ -137,6 +137,7 @@ data class StCharacterBook(
 @Serializable
 data class StCharacterBookEntry(
     val id: Int = 0,
+    val name: String = "",
     val keys: List<String> = emptyList(),
     val secondaryKeys: List<String> = emptyList(),
     val content: String = "",

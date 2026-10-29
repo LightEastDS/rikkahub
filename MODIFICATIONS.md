@@ -33,6 +33,18 @@
 * **已知限制**：显示层 Regex、Text Completion 预设、世界书递归 / sticky / 分组竞争、`continue_prefill`、`names_behavior` 暂不支持。
 * **文档**：`docs/ST-PRESET-COMPAT.md`。
 
+### 4. SillyTavern 角色卡内嵌世界书导入 (Character Card Worldbook Import)
+* **功能描述**：在助手页面导入 SillyTavern 角色卡（PNG 或 JSON）时，若角色卡包含内嵌世界书（`character_book`），系统会自动检测并弹出确认提示对话框，询问用户是否同时导入该世界书。
+* **交互流程**：
+  * **导入世界书**：将角色卡中的世界书完整转化为 RikkaHub 原生世界书（`Lorebook`）并存入全局世界书库，同时将新生成的 `lorebookId` 自动关联至该助手；同时清空角色卡内未转化的 `characterBook`，保证世界书在「设置 → 提示词 → 世界书」中可视化编辑、启停、导出，且避免聊天组装时双重注入。
+  * **仅导入角色**：仅保留角色基本设定（名称、描述、第一条消息等），不将世界书导入至世界书库或助手中。
+  * **取消**：关闭弹窗，终止本次导入操作。
+* **解析兼容性**：
+  * **格式支持**：兼容 PNG `tEXt` 块的 `[chara:` 及 `[ccv3:` 格式与原生 JSON 角色卡；
+  * **结构支持**：同时支持 `data.character_book` 与顶层 `character_book`，兼容 `entries` 为数组（Array）或对象映射（Map）两种组织形式；
+  * **条目属性转换**：自动映射条目名称/注释（`comment`/`name`）、触发关键词（`keys`/`key`）、次要关键词、常驻激活（`constant`）、启用状态（`enabled`/`!disable`）、优先级插入顺序（`insertion_order`/`order`）、插入位置（`before_char` 映射为 `BEFORE_SYSTEM_PROMPT`，`after_char` 映射为 `AFTER_SYSTEM_PROMPT`，`at_depth` 映射为 `AT_DEPTH` 等）、扫描深度（`scan_depth`）、深度（`depth`）、正则表达式开关（`use_regex`）与大小写敏感度；
+  * **世界书中心扩展**：同步增强了「提示词 → 世界书」独立导入入口，支持直接选择包含世界书的卡片或独立导出的 Tavern 世界书 JSON。
+
 ---
 
 ## 二、 纯净化与去商业化改造 (De-commercialization & Clean-up)
@@ -109,7 +121,9 @@
 | `data/model/Assistant.kt` / `CharacterCard.kt` / `ConversationConfig.kt` | 功能新增 | `stPresetId` 绑定、结构化角色卡、会话级预设快照 |
 | `data/ai/ChatRequestFactory.kt` | 功能新增 | `ST_PRESET` / legacy 双路径，预设模式下接管 system / marker / in-chat |
 | `ui/pages/extensions/PromptPage.kt` / `PromptVM.kt` | UI 新增 | ST 预设 tab：导入、启停、删除、导出、详情与 Inspect |
-| `ui/pages/assistant/detail/AssistantBasicPage.kt` / `AssistantImporter.kt` | UI / 功能 | 预设绑定入口；V2/V3 角色卡结构化字段与 `character_book` |
+| `ui/pages/assistant/detail/AssistantBasicPage.kt` / `AssistantImporter.kt` | UI / 功能 | 预设绑定入口；V2/V3 角色卡结构化字段与 `character_book`，导入世界书弹窗确认 |
+| `data/stpreset/TavernWorldBookParser.kt` | 功能新增 | ST 角色卡内嵌世界书与独立世界书通用转换引擎，映射到原生 `Lorebook` |
+| `app/build.gradle.kts` | 签名与版本 | 配置 Release 签名密钥，更新版本号（`3.1.1.3`，versionCode 201） |
 | `docs/ST-PRESET-COMPAT.md` | 文档 | 支持范围、使用方式、限制与测试说明 |
 
 ---
@@ -165,4 +179,9 @@
   2. **ST 预设编辑界面风格对齐**：将 ST 预设编辑底栏弹窗、条目卡片、启用开关等 UI 风格与世界书及模式注入完全对齐统一；
   3. **智能多语言字数统计**：重构消息字数统计，精准适配中文、英文、日文及中英日混排，彻底排除空白与换行字符；
   4. **版本号升级**：升至 `3.1.1.2`（versionCode: 200）。
+* **v3.1.1.3**：
+  1. **角色卡内嵌世界书导入支持**：助手处导入 SillyTavern 角色卡（PNG/JSON）时，若包含内嵌世界书，弹出提醒对话框询问是否导入；
+  2. **世界书与助手双向绑定**：确认导入时将世界书解析转入系统 `Lorebook` 库，并自动关联至助手的 `lorebookIds`，确保在无预设和有预设模式下均能正常触发；
+  3. **V2/V3 与多格式健壮兼容**：支持 PNG `chara`/`ccv3` 块、`character_book` 数组与字典结构、完整映射条目关键词、常驻激活、正则表达式、位置与深度；
+  4. **版本号升级**：升至 `3.1.1.3`（versionCode: 201）。
 

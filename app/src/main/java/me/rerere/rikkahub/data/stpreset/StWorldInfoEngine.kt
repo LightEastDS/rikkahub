@@ -49,7 +49,7 @@ object StWorldInfoEngine {
                 else -> WorldPosition.BEFORE
             }
             activated += ActivatedEntry(
-                name = "character_book#${entry.id}",
+                name = entry.name.ifBlank { "character_book#${entry.id}" },
                 content = entry.content,
                 position = position,
                 depth = entry.depth,
@@ -95,7 +95,9 @@ object StWorldInfoEngine {
             }
         }
 
-        val sorted = activated.sortedWith(compareBy<ActivatedEntry> { it.order }.thenBy { it.name })
+        val sorted = activated
+            .distinctBy { it.content.trim() }
+            .sortedWith(compareBy<ActivatedEntry> { it.order }.thenBy { it.name })
         val before = StringBuilder()
         val after = StringBuilder()
         val depth = mutableListOf<StWorldInfoDepthEntry>()

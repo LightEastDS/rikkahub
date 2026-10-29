@@ -116,10 +116,12 @@ object LorebookSerializer : ExportSerializer<Lorebook> {
     override fun import(context: Context, uri: Uri): Result<Lorebook> {
         return runCatching {
             val json = readUri(context, uri)
+            val fileName = getUriFileName(context, uri)?.removeSuffix(".json")
             // 首先尝试解析为自己的格式
             tryImportNative(json)
             // 然后尝试解析为 SillyTavern 格式
-                ?: tryImportSillyTavern(json, getUriFileName(context, uri)?.removeSuffix(".json"))
+                ?: tryImportSillyTavern(json, fileName)
+                ?: me.rerere.rikkahub.data.stpreset.TavernWorldBookParser.parseFromJsonString(json, fileName ?: "SillyTavern Worldbook")
                 ?: throw IllegalArgumentException("Unsupported format")
         }
     }

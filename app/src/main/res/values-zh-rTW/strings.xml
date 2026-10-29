@@ -34,6 +34,12 @@
   <string name="assistant_importer_read_json_failed">讀取JSON失敗</string>
   <string name="assistant_importer_unsupported_file_type">不支援的檔案類型: %s</string>
   <string name="assistant_importer_unsupported_spec">不支援的規格: %s</string>
+  <string name="assistant_importer_worldbook_dialog_title">匯入世界書</string>
+  <string name="assistant_importer_worldbook_dialog_message">偵測到該角色卡包含世界書「%1$s」（共 %2$d 條內容）。是否同時匯入該世界書並綁定到此助手？</string>
+  <string name="assistant_importer_worldbook_dialog_confirm">匯入世界書</string>
+  <string name="assistant_importer_worldbook_dialog_skip">僅匯入角色</string>
+  <string name="assistant_importer_worldbook_imported_toast">已匯入世界書「%1$s」（%2$d 條）</string>
+  <string name="assistant_importer_worldbook_default_name">%s 的世界書</string>
   <string name="assistant_page_actions">操作</string>
   <string name="assistant_page_add">添加</string>
   <string name="assistant_page_add_body">添加 Body</string>

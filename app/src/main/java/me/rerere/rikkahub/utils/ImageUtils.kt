@@ -248,13 +248,14 @@ object ImageUtils {
 
         val pngDirectory = metadata.getDirectoriesOfType(PngDirectory::class.java)
             .firstOrNull { directory ->
-                directory.pngChunkType == PngChunkType.tEXt &&
-                    directory.getString(PngDirectory.TAG_TEXTUAL_DATA).startsWith("[chara:")
+                if (directory.pngChunkType != PngChunkType.tEXt) return@firstOrNull false
+                val text = directory.getString(PngDirectory.TAG_TEXTUAL_DATA) ?: return@firstOrNull false
+                text.startsWith("[chara:") || text.startsWith("[ccv3:")
             } ?: error("No tEXt chunk found, please check if the image is a character card")
 
         val value = pngDirectory.getString(PngDirectory.TAG_TEXTUAL_DATA)
 
-        val regex = Regex("""\[chara:\s*(.+?)]""")
+        val regex = Regex("""\[(?:chara|ccv3):\s*(.+?)]""")
         return Result.success(regex.find(value)?.groupValues?.get(1) ?: error("No character data found"))
     }
 

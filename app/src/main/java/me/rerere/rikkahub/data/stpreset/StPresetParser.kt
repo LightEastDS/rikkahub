@@ -325,11 +325,15 @@ object StPresetParser {
     /** 解析 Character Book（角色卡 data.character_book）；没有条目时返回 null。 */
     fun parseCharacterBook(book: JsonObject?): StCharacterBook? {
         book ?: return null
-        val entries = book["entries"].jsonArrayOrNull() ?: return null
+        val entries = when (val raw = book["entries"]) {
+            is JsonArray -> raw.mapNotNull { it as? JsonObject }
+            is JsonObject -> raw.values.mapNotNull { it as? JsonObject }
+            else -> emptyList()
+        }
+        if (entries.isEmpty()) return null
         return StCharacterBook(
             name = book.string("name").orEmpty(),
-            entries = entries.mapNotNull { element ->
-                val obj = element as? JsonObject ?: return@mapNotNull null
+            entries = entries.mapNotNull { obj ->
                 parseCharacterBookEntry(obj)
             }
         )
@@ -339,8 +343,10 @@ object StPresetParser {
         val extensions = obj["extensions"] as? JsonObject
         val content = obj.string("content").orEmpty()
         if (content.isBlank()) return null
+        val comment = obj.string("comment").orEmpty().ifBlank { obj.string("name").orEmpty() }
         return StCharacterBookEntry(
             id = obj.int("id") ?: obj.int("uid") ?: 0,
+            name = comment,
             keys = obj["keys"].stringList().ifEmpty { obj["key"].stringList() },
             secondaryKeys = obj["secondary_keys"].stringList().ifEmpty { obj["keysecondary"].stringList() },
             content = content,
@@ -402,8 +408,11 @@ private fun JsonObject.messageRole(key: String): MessageRole {
 }
 
 private fun JsonElement?.stringList(): List<String> {
-    val array = this as? JsonArray ?: return emptyList()
-    return array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
+    return when (this) {
+        is JsonArray -> mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotBlank) }
+        is JsonPrimitive -> contentOrNull?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
+        else -> emptyList()
+    }
 }
 
 private fun JsonElement?.stringSet(): Set<String> = stringList().toSet()
