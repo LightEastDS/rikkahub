@@ -460,6 +460,7 @@
   <string name="prompt_page_edit">Bearbeiten</string>
   <string name="prompt_page_edit_entry">Eintrag bearbeiten</string>
   <string name="prompt_page_edit_lorebook">Lorebook bearbeiten</string>
+  <string name="prompt_page_edit_st_preset">ST-Preset bearbeiten</string>
   <string name="placeholder_model_name">Modellname</string>
   <string name="placeholder_nickname">Benutzernickname</string>
   <string name="placeholder_system_version">Systemversion</string>

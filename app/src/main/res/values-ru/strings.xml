@@ -472,6 +472,7 @@
   <string name="prompt_page_edit">Редактировать</string>
   <string name="prompt_page_edit_entry">Редактировать запись</string>
   <string name="prompt_page_edit_lorebook">Редактировать Lorebook</string>
+  <string name="prompt_page_edit_st_preset">Редактировать пресет ST</string>
   <string name="prompt_page_edit_mode_injection">Внедрение режима редактирования</string>
   <string name="prompt_page_empty_hint">Нажмите кнопку ниже, чтобы добавить</string>
   <string name="prompt_page_enabled">Включено</string>

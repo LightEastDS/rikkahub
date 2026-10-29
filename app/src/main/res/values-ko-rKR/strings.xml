@@ -472,6 +472,7 @@
   <string name="prompt_page_edit">편집</string>
   <string name="prompt_page_edit_entry">항목 편집</string>
   <string name="prompt_page_edit_lorebook">로어북 편집</string>
+  <string name="prompt_page_edit_st_preset">ST 프리셋 편집</string>
   <string name="prompt_page_edit_mode_injection">편집 모드 삽입</string>
   <string name="prompt_page_empty_hint">아래 버튼을 클릭하여 추가하세요</string>
   <string name="prompt_page_enabled">활성화됨</string>

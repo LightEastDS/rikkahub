@@ -483,6 +483,7 @@
   <string name="prompt_page_edit">Edit</string>
   <string name="prompt_page_edit_entry">Edit Entry</string>
   <string name="prompt_page_edit_lorebook">Edit Lorebook</string>
+  <string name="prompt_page_edit_st_preset">Edit ST Preset</string>
   <string name="prompt_page_edit_mode_injection">Edit Mode Injection</string>
   <string name="prompt_page_empty_hint">Click the button below to add</string>
   <string name="prompt_page_enabled">Enabled</string>

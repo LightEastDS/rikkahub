@@ -472,6 +472,7 @@
   <string name="prompt_page_edit">編集</string>
   <string name="prompt_page_edit_entry">エントリを編集</string>
   <string name="prompt_page_edit_lorebook">ロアブックを編集</string>
+  <string name="prompt_page_edit_st_preset">ST プリセットを編集</string>
   <string name="prompt_page_edit_mode_injection">編集モードインジェクション</string>
   <string name="prompt_page_empty_hint">下のボタンをクリックして追加</string>
   <string name="prompt_page_enabled">有効</string>

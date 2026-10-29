@@ -35,6 +35,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
+import me.rerere.hugeicons.stroke.Alert01
+import me.rerere.hugeicons.stroke.Refresh01
+import me.rerere.hugeicons.stroke.View
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
 import androidx.compose.material3.HorizontalFloatingToolbar
@@ -1427,24 +1432,24 @@ private fun StPresetTab(
     }
 
     records.firstOrNull { it.preset.id == detailId }?.let { record ->
-        ModalBottomSheet(onDismissRequest = { detailId = null }) {
-            StPresetDetailContent(
-                record = record,
-                assistants = assistants,
-                personaName = personaName,
-                userPersona = userPersona,
-                onTogglePrompt = { orderIndex, enabled ->
-                    vm.setStPromptEnabled(record.preset.id, orderIndex, enabled)
-                },
-                onMovePrompt = { orderIndex, delta ->
-                    vm.moveStPrompt(record.preset.id, orderIndex, delta)
-                },
-                onResetPreset = { vm.resetStPreset(record.preset.id) },
-                onUpdatePrompt = { identifier, name, role, content ->
-                    vm.updateStPrompt(record.preset.id, identifier, name, content, role)
-                },
-            )
-        }
+        StPresetEditSheet(
+            record = record,
+            assistants = assistants,
+            personaName = personaName,
+            userPersona = userPersona,
+            onDismiss = { detailId = null },
+            onTogglePreset = { vm.setStPresetEnabled(record.preset.id, it) },
+            onTogglePrompt = { orderIndex, enabled ->
+                vm.setStPromptEnabled(record.preset.id, orderIndex, enabled)
+            },
+            onMovePrompt = { orderIndex, delta ->
+                vm.moveStPrompt(record.preset.id, orderIndex, delta)
+            },
+            onResetPreset = { vm.resetStPreset(record.preset.id) },
+            onUpdatePrompt = { identifier, name, role, content ->
+                vm.updateStPrompt(record.preset.id, identifier, name, content, role)
+            },
+        )
     }
 }
 
@@ -1547,16 +1552,23 @@ private fun StPresetCard(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StPresetDetailContent(
+private fun StPresetEditSheet(
     record: StPresetRecord,
     assistants: List<Assistant>,
     personaName: String,
     userPersona: String,
+    onDismiss: () -> Unit,
+    onTogglePreset: (Boolean) -> Unit,
     onTogglePrompt: (orderIndex: Int, enabled: Boolean) -> Unit,
     onMovePrompt: (orderIndex: Int, delta: Int) -> Unit,
     onResetPreset: () -> Unit,
     onUpdatePrompt: (identifier: String, name: String, role: MessageRole, content: String) -> Unit,
 ) {
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
+    )
+    val scope = rememberCoroutineScope()
     val preset = record.preset
     val rows = remember(preset) { StPromptAssembler.editablePrompts(preset) }
     val mountedRows = rows.filter { it.orderIndex != null }
@@ -1564,129 +1576,262 @@ private fun StPresetDetailContent(
     var showInspect by remember { mutableStateOf(false) }
     var editingRow by remember { mutableStateOf<StPromptRow?>(null) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.92f)
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        sheetGesturesEnabled = false,
+        dragHandle = {
+            IconButton(onClick = {
+                scope.launch {
+                    sheetState.hide()
+                    onDismiss()
+                }
+            }) {
+                Icon(HugeIcons.ArrowDown01, null)
+            }
+        }
     ) {
-        Text(
-            text = preset.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Text(
-            text = stringResource(
-                R.string.prompt_page_st_preset_summary,
-                preset.prompts.size,
-                preset.promptOrder.sumOf { it.order.size },
-                preset.regexScripts.size,
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(R.string.prompt_page_st_preset_copy_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.95f)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Button(
-                onClick = { showInspect = true },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.prompt_page_st_preset_inspect))
-            }
-            if (record.isModified) {
-                TextButton(onClick = onResetPreset) {
-                    Text(stringResource(R.string.prompt_page_st_preset_restore_default))
-                }
-            }
-        }
-        Text(
-            text = stringResource(R.string.prompt_page_st_preset_inspect_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (preset.warnings.isNotEmpty()) {
             Text(
-                text = stringResource(R.string.prompt_page_st_preset_warnings),
-                style = MaterialTheme.typography.titleSmallEmphasized,
+                text = stringResource(R.string.prompt_page_edit_st_preset),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
             )
-            preset.warnings.take(6).forEach { warning ->
-                Text(
-                    text = "• $warning",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-        Text(
-            text = stringResource(R.string.prompt_page_st_preset_order),
-            style = MaterialTheme.typography.titleSmallEmphasized,
-        )
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            contentPadding = PaddingValues(bottom = 12.dp),
-        ) {
-            items(mountedRows, key = { "${it.prompt.identifier}:${it.orderIndex}" }) { row ->
-                StPromptEditRow(
-                    row = row,
-                    canMoveUp = (row.orderIndex ?: 0) > 0,
-                    canMoveDown = (row.orderIndex ?: 0) < mountedRows.lastIndex,
-                    onToggle = { enabled -> row.orderIndex?.let { onTogglePrompt(it, enabled) } },
-                    onMoveUp = { row.orderIndex?.let { onMovePrompt(it, -1) } },
-                    onMoveDown = { row.orderIndex?.let { onMovePrompt(it, 1) } },
-                    onEdit = { editingRow = row },
-                )
-            }
-            if (detachedRows.isNotEmpty()) {
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 16.dp),
+            ) {
                 item {
-                    Text(
-                        text = stringResource(R.string.prompt_page_st_preset_detached),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
+                    OutlinedTextField(
+                        value = preset.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
+                        onValueChange = {},
+                        label = { Text(stringResource(R.string.prompt_page_name)) },
+                        readOnly = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
-                items(detachedRows, key = { "detached:${it.prompt.identifier}" }) { row ->
-                    StPromptEditRow(
-                        row = row,
-                        canMoveUp = false,
-                        canMoveDown = false,
-                        onToggle = {},
-                        onMoveUp = {},
-                        onMoveDown = {},
-                        onEdit = { editingRow = row },
+
+                item {
+                    OutlinedTextField(
+                        value = stringResource(
+                            R.string.prompt_page_st_preset_summary,
+                            preset.prompts.size,
+                            preset.promptOrder.sumOf { it.order.size },
+                            preset.regexScripts.size,
+                        ) + "\n" + stringResource(R.string.prompt_page_st_preset_copy_hint),
+                        onValueChange = {},
+                        label = { Text(stringResource(R.string.prompt_page_description)) },
+                        readOnly = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
                     )
+                }
+
+                item {
+                    FormItem(
+                        label = { Text(stringResource(R.string.prompt_page_enabled)) },
+                        tail = {
+                            Switch(
+                                checked = record.enabled,
+                                onCheckedChange = onTogglePreset,
+                            )
+                        }
+                    )
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledTonalButton(
+                            onClick = { showInspect = true },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(HugeIcons.View, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.prompt_page_st_preset_inspect))
+                        }
+                        if (record.isModified) {
+                            OutlinedButton(onClick = onResetPreset) {
+                                Icon(HugeIcons.Refresh01, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.size(8.dp))
+                                Text(stringResource(R.string.prompt_page_st_preset_restore_default))
+                            }
+                        }
+                    }
+                }
+
+                if (preset.warnings.isNotEmpty()) {
+                    item {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        HugeIcons.Alert01,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.prompt_page_st_preset_warnings),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                preset.warnings.take(6).forEach { warning ->
+                                    Text(
+                                        text = "• $warning",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.prompt_page_entries_format, mountedRows.size),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                }
+
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                        mountedRows.fastForEachIndexed { index, row ->
+                            StPromptEditRow(
+                                row = row,
+                                shape = cardGroupItemShape(index, mountedRows.size),
+                                canMoveUp = (row.orderIndex ?: 0) > 0,
+                                canMoveDown = (row.orderIndex ?: 0) < mountedRows.lastIndex,
+                                onToggle = { enabled -> row.orderIndex?.let { onTogglePrompt(it, enabled) } },
+                                onMoveUp = { row.orderIndex?.let { onMovePrompt(it, -1) } },
+                                onMoveDown = { row.orderIndex?.let { onMovePrompt(it, 1) } },
+                                onEdit = { editingRow = row },
+                            )
+                        }
+                    }
+                }
+
+                if (detachedRows.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.prompt_page_st_preset_detached),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                            detachedRows.fastForEachIndexed { index, row ->
+                                StPromptEditRow(
+                                    row = row,
+                                    shape = cardGroupItemShape(index, detachedRows.size),
+                                    canMoveUp = false,
+                                    canMoveDown = false,
+                                    onToggle = {},
+                                    onMoveUp = {},
+                                    onMoveDown = {},
+                                    onEdit = { editingRow = row },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (preset.regexScripts.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.prompt_page_st_preset_regex),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                            preset.regexScripts.fastForEachIndexed { index, script ->
+                                Surface(
+                                    shape = cardGroupItemShape(index, preset.regexScripts.size),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = script.name.ifBlank { script.findRegex.take(40) },
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Tag(type = TagType.DEFAULT) {
+                                                    Text(if (script.isDisplayScript) "display" else "prompt")
+                                                }
+                                                if (script.disabled) {
+                                                    Tag(type = TagType.WARNING) {
+                                                        Text(stringResource(R.string.prompt_page_disabled))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            if (preset.regexScripts.isNotEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(R.string.prompt_page_st_preset_regex),
-                        style = MaterialTheme.typography.titleSmallEmphasized,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-                items(preset.regexScripts) { script ->
-                    Text(
-                        text = buildString {
-                            append(script.name.ifBlank { script.findRegex.take(40) })
-                            append(" · ")
-                            append(if (script.isDisplayScript) "display" else "prompt")
-                            append(" · placement ")
-                            append(script.placement.joinToString(",").ifBlank { "?" })
-                            if (script.disabled) append(" · disabled")
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+            ) {
+                Button(onClick = {
+                    scope.launch {
+                        sheetState.hide()
+                        onDismiss()
+                    }
+                }) {
+                    Text(stringResource(R.string.prompt_page_confirm))
                 }
             }
         }
@@ -1749,7 +1894,7 @@ private fun StPresetDetailContent(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showInspect = false }) {
+                Button(onClick = { showInspect = false }) {
                     Text(stringResource(R.string.prompt_page_st_preset_close))
                 }
             },
@@ -1768,10 +1913,10 @@ private fun StPresetDetailContent(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StPromptEditRow(
     row: StPromptRow,
+    shape: Shape,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     onToggle: (Boolean) -> Unit,
@@ -1784,29 +1929,17 @@ private fun StPromptEditRow(
     val notApplicable = row.orderIndex == null ||
         (prompt.marker && prompt.identifier !in StPresetParser.KNOWN_MARKERS) ||
         (!prompt.marker && prompt.content.isBlank())
-    val status = when {
-        notApplicable -> stringResource(R.string.prompt_page_st_preset_status_na)
-        protected || row.enabled -> stringResource(R.string.prompt_page_st_preset_status_active)
-        else -> stringResource(R.string.prompt_page_st_preset_status_disabled)
-    }
-    val statusType = when {
-        notApplicable -> TagType.WARNING
-        protected || row.enabled -> TagType.SUCCESS
-        else -> TagType.ERROR
-    }
+
     Surface(
         onClick = onEdit,
-        shape = RoundedCornerShape(14.dp),
-        color = if ((row.enabled || protected) && !notApplicable) {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
-        },
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1814,47 +1947,33 @@ private fun StPromptEditRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                Text(
+                    text = "${row.orderIndex?.plus(1) ?: "—"}. ${prompt.name.ifBlank { prompt.identifier }}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = "${row.orderIndex?.plus(1) ?: "—"}. ${prompt.name.ifBlank { prompt.identifier }}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Icon(
-                        imageVector = HugeIcons.Edit01,
-                        contentDescription = stringResource(R.string.prompt_page_st_preset_edit),
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Tag(type = TagType.DEFAULT) { Text(prompt.role.name.lowercase()) }
                     if (prompt.marker) {
                         Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_marker)) }
                     } else if (prompt.isInChat) {
-                        Tag(type = TagType.WARNING) {
+                        Tag(type = TagType.INFO) {
                             Text(stringResource(R.string.prompt_page_st_preset_in_chat_depth, prompt.injectionDepth))
                         }
-                    } else {
-                        Tag(type = TagType.DEFAULT) { Text(stringResource(R.string.prompt_page_st_preset_relative)) }
                     }
                     if (protected) {
                         Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_protected)) }
                     }
-                    Tag(type = statusType) { Text(status) }
-                    Text(
-                        text = stringResource(R.string.prompt_page_st_preset_chars, prompt.content.length),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (!row.enabled && !protected && !notApplicable) {
+                        Tag(type = TagType.WARNING) { Text(stringResource(R.string.prompt_page_disabled)) }
+                    }
+                    if (notApplicable) {
+                        Tag(type = TagType.WARNING) { Text(stringResource(R.string.prompt_page_st_preset_status_na)) }
+                    }
                 }
             }
             if (!notApplicable) {
@@ -1862,22 +1981,35 @@ private fun StPromptEditRow(
                     checked = protected || row.enabled,
                     onCheckedChange = if (protected) null else onToggle,
                 )
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(
-                        onClick = onMoveUp,
-                        enabled = canMoveUp,
-                        modifier = Modifier.size(30.dp),
-                    ) {
-                        Icon(HugeIcons.ArrowUp01, stringResource(R.string.prompt_page_st_preset_move_up))
+                ItemActionMenu(
+                    actions = buildList {
+                        add(
+                            ItemAction(
+                                text = stringResource(R.string.prompt_page_st_preset_edit),
+                                icon = HugeIcons.Edit01,
+                                onClick = onEdit,
+                            )
+                        )
+                        if (canMoveUp) {
+                            add(
+                                ItemAction(
+                                    text = stringResource(R.string.prompt_page_st_preset_move_up),
+                                    icon = HugeIcons.ArrowUp01,
+                                    onClick = onMoveUp,
+                                )
+                            )
+                        }
+                        if (canMoveDown) {
+                            add(
+                                ItemAction(
+                                    text = stringResource(R.string.prompt_page_st_preset_move_down),
+                                    icon = HugeIcons.ArrowDown01,
+                                    onClick = onMoveDown,
+                                )
+                            )
+                        }
                     }
-                    IconButton(
-                        onClick = onMoveDown,
-                        enabled = canMoveDown,
-                        modifier = Modifier.size(30.dp),
-                    ) {
-                        Icon(HugeIcons.ArrowDown01, stringResource(R.string.prompt_page_st_preset_move_down))
-                    }
-                }
+                )
             }
         }
     }
@@ -1923,13 +2055,14 @@ private fun StPromptEditDialog(
                         text = stringResource(R.string.prompt_page_injection_role),
                         style = MaterialTheme.typography.titleSmall,
                     )
-                    Select(
+                    ConnectedChoiceButtons(
                         options = listOf(MessageRole.SYSTEM, MessageRole.USER, MessageRole.ASSISTANT),
-                        selectedOption = role,
-                        onOptionSelected = { role = it },
-                        optionToString = { it.name.lowercase() },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                        selected = role,
+                        onSelect = { role = it },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) { option, selected ->
+                        ConnectedChoiceLabel(text = option.name.lowercase(), selected = selected)
+                    }
                     OutlinedTextField(
                         value = content,
                         onValueChange = { content = it },
@@ -1943,7 +2076,7 @@ private fun StPromptEditDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(name.trim(), role, content) }) {
+            Button(onClick = { onSave(name.trim(), role, content) }) {
                 Text(stringResource(R.string.prompt_page_confirm))
             }
         },

@@ -475,6 +475,7 @@
   <string name="prompt_page_edit">編輯</string>
   <string name="prompt_page_edit_entry">編輯項目</string>
   <string name="prompt_page_edit_lorebook">編輯 Lorebook</string>
+  <string name="prompt_page_edit_st_preset">編輯 ST 預設</string>
   <string name="prompt_page_edit_mode_injection">編輯模式注入</string>
   <string name="prompt_page_empty_hint">點擊下方按鈕以新增</string>
   <string name="prompt_page_enabled">已啟用</string>

@@ -478,6 +478,7 @@
   <string name="prompt_page_edit">编辑</string>
   <string name="prompt_page_edit_entry">编辑条目</string>
   <string name="prompt_page_edit_lorebook">编辑世界书</string>
+  <string name="prompt_page_edit_st_preset">编辑 ST 预设</string>
   <string name="prompt_page_edit_mode_injection">编辑模式注入</string>
   <string name="prompt_page_empty_hint">点击下方按钮添加</string>
   <string name="prompt_page_enabled">启用</string>

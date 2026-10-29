@@ -575,6 +575,7 @@
   <string name="prompt_page_edit">تعديل</string>
   <string name="prompt_page_edit_entry">تعديل المدخل</string>
   <string name="prompt_page_edit_lorebook">تعديل كتاب معرفة</string>
+  <string name="prompt_page_edit_st_preset">تعديل الإعداد المسبق لـ ST</string>
   <string name="prompt_page_edit_mode_injection">تعديل حقن أوضاع</string>
   <string name="prompt_page_empty_hint">اضغط على الزر أدناه للإضافة</string>
   <string name="prompt_page_enabled">مُفعّل</string>
