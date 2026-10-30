@@ -194,6 +194,12 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_display_page_show_word_count_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_display_page_show_word_count_title)) },
                     )
+                    switchItem(
+                        checked = displaySetting.showFloor,
+                        onCheckedChange = { updateDisplaySetting(displaySetting.copy(showFloor = it)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_show_floor_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_show_floor_title)) },
+                    )
                 }
             }
 

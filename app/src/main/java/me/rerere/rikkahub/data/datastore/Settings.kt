@@ -146,6 +146,7 @@ data class DisplaySetting(
     val showDateTimeInMessage: Boolean = false,
     val showTokenUsage: Boolean = true,
     val showWordCount: Boolean = false,
+    val showFloor: Boolean = true,
     val showThinkingContent: Boolean = true,
     val autoCloseThinking: Boolean = true,
     val updateCheckDisabledUntilEpochMillis: Long = 0L,

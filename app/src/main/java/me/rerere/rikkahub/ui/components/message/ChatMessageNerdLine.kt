@@ -75,7 +75,8 @@ fun ChatMessageNerdLine(
     val settings = LocalSettings.current
     val usage = message.usage
     val showTokenStats = settings.displaySetting.showTokenUsage && usage != null
-    val hasAnyContent = (nodeIndex >= 0) || message.isHidden || settings.displaySetting.showWordCount || showTokenStats
+    val showFloor = settings.displaySetting.showFloor && nodeIndex >= 0
+    val hasAnyContent = showFloor || message.isHidden || settings.displaySetting.showWordCount || showTokenStats
     if (!hasAnyContent) return
 
     val stats = remember(message, usage) {
@@ -105,7 +106,7 @@ fun ChatMessageNerdLine(
                         )
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                 ) {
-                    if (nodeIndex >= 0) {
+                    if (showFloor) {
                         StatsItem(
                             icon = {
                                 Icon(

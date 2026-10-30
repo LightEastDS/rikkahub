@@ -714,6 +714,8 @@
   <string name="setting_display_page_show_token_usage_title">显示Token和上下文统计</string>
   <string name="setting_display_page_show_word_count_desc">显示消息的字数统计</string>
   <string name="setting_display_page_show_word_count_title">显示字数统计</string>
+  <string name="setting_display_page_show_floor_desc">在消息状态栏显示对话所在的楼层轮次</string>
+  <string name="setting_display_page_show_floor_title">显示消息楼层</string>
   <string name="setting_display_page_show_updates_desc">是否显示应用更新通知</string>
   <string name="setting_display_page_show_updates_title">显示更新</string>
   <string name="setting_display_page_show_user_avatar_desc">是否在聊天消息中显示用户头像</string>
