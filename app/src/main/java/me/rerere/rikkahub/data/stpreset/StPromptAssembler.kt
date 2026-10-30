@@ -276,17 +276,18 @@ object StPromptAssembler {
                 zoneB += systemMessage(
                     """
                     <conversation_summary>
-                    [以下是历史会话（第 1 轮至第 ${req.checkpoint.boundaryFloor} 轮）的核心大纲与背景记忆，请将其视为既定事实并在此基础上继续对话]
+                    [以下是历史会话（第 ${req.checkpoint.startFloor} 轮至第 ${req.checkpoint.boundaryFloor} 轮）的核心大纲与背景记忆，请将其视为既定事实并在此基础上继续对话]
                     ${req.checkpoint.summaryContent}
                     </conversation_summary>
                     """.trimIndent()
                 )
                 // 高光时刻穿透 (Milestone Whitelist)：压缩区间内被收藏/固定的非隐藏消息
                 val boundaryIndex = req.liveMessages.indexOfLast { it.id.toString() == req.checkpoint.boundaryNodeId }
+                val startIdx = (req.checkpoint.startFloor - 1).coerceAtLeast(0)
                 val beforeCheckpoint = if (boundaryIndex >= 0) {
-                    req.liveMessages.take(boundaryIndex + 1)
+                    if (startIdx <= boundaryIndex) req.liveMessages.subList(startIdx, boundaryIndex + 1) else emptyList()
                 } else if (req.checkpoint.boundaryFloor in 1..req.liveMessages.size) {
-                    req.liveMessages.take(req.checkpoint.boundaryFloor)
+                    if (startIdx < req.checkpoint.boundaryFloor) req.liveMessages.subList(startIdx, req.checkpoint.boundaryFloor) else emptyList()
                 } else {
                     emptyList()
                 }
@@ -519,13 +520,19 @@ object StPromptAssembler {
         checkpoint: ConversationCheckpointEntity,
     ): List<UIMessage> {
         val boundaryIndex = messages.indexOfLast { it.id.toString() == checkpoint.boundaryNodeId }
-        return if (boundaryIndex >= 0 && boundaryIndex < messages.size - 1) {
+        val afterList = if (boundaryIndex >= 0 && boundaryIndex < messages.size - 1) {
             messages.subList(boundaryIndex + 1, messages.size)
         } else if (checkpoint.boundaryFloor in 1 until messages.size) {
             messages.drop(checkpoint.boundaryFloor)
         } else {
-            messages
+            emptyList()
         }
+        val beforeList = if (checkpoint.startFloor > 1 && checkpoint.startFloor <= messages.size) {
+            messages.take(checkpoint.startFloor - 1)
+        } else {
+            emptyList()
+        }
+        return beforeList + afterList
     }
 
     private fun StPreset.hasEnabledMarker(identifier: String): Boolean {

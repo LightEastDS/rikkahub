@@ -282,6 +282,36 @@ class ChatVM(
         }
     }
 
+    fun executeCompact(
+        startFloor: Int,
+        endFloor: Int,
+        targetTokensK: Int,
+        model: Model,
+        compressPrompt: String,
+        autoHide: Boolean,
+        onResult: (Boolean, String) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = chatService.executeCompact(
+                conversationId = _conversationId,
+                startFloor = startFloor,
+                endFloor = endFloor,
+                targetTokensK = targetTokensK,
+                model = model,
+                compressPrompt = compressPrompt,
+                autoHide = autoHide,
+            )
+            onResult(result.success, result.message)
+        }
+    }
+
+    fun batchSetFloorsHidden(floorIndices: Set<Int>, isHide: Boolean, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = chatService.batchSetFloorsHidden(_conversationId, floorIndices, isHide)
+            onResult(result.success, result.message)
+        }
+    }
+
     fun toggleHideMessage(messageId: Uuid) {
         viewModelScope.launch {
             chatService.toggleHideMessage(_conversationId, messageId)

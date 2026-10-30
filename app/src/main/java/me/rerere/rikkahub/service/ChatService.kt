@@ -30,6 +30,7 @@ import me.rerere.ai.agent.RetryAttempt
 import me.rerere.ai.agent.runAgent
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
@@ -48,6 +49,8 @@ import me.rerere.rikkahub.data.ai.prompts.buildCompressPrompt
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -60,6 +63,7 @@ import me.rerere.rikkahub.data.model.deleteMessage
 import me.rerere.rikkahub.data.model.editMessage
 import me.rerere.rikkahub.data.model.fillModelSnapshots
 import me.rerere.rikkahub.data.model.fork
+import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.model.getStoredAssistantOf
@@ -1379,9 +1383,38 @@ class ChatService(
         }
     }
 
+    suspend fun batchSetFloorsHidden(conversationId: Uuid, floorIndices: Set<Int>, isHide: Boolean): HideCommandResult {
+        var affectedCount = 0
+        var totalFloors = 0
+        mutate(conversationId) { conversation ->
+            totalFloors = conversation.messageNodes.size
+            val validIndices = floorIndices.filter { it in 0 until totalFloors }.toSet()
+            affectedCount = validIndices.size
+            if (validIndices.isEmpty()) {
+                conversation
+            } else {
+                val newNodes = conversation.messageNodes.mapIndexed { index, node ->
+                    if (index in validIndices) {
+                        node.copy(messages = node.messages.map { it.copy(isHidden = isHide) })
+                    } else {
+                        node
+                    }
+                }
+                conversation.copy(messageNodes = newNodes)
+            }
+        }
+        if (affectedCount == 0) {
+            return HideCommandResult(false, "未找到有效楼层进行操作（当前会话共 $totalFloors 层）")
+        }
+        val actionDesc = if (isHide) "隐藏" else "取消隐藏"
+        return HideCommandResult(true, "已${actionDesc} ${affectedCount} 层消息上下文", affectedCount)
+    }
+
     companion object {
-        private val HIDE_CMD_REGEX = Regex("""^/(hide|unhide|show)\b(.*)$""", RegexOption.IGNORE_CASE)
-        private val COMPACT_CMD_REGEX = Regex("""^/compact\b(.*)$""", RegexOption.IGNORE_CASE)
+        val HIDE_CMD_REGEX = Regex("""^/(hide|unhide|show)\b(.*)$""", RegexOption.IGNORE_CASE)
+        val COMPACT_CMD_REGEX = Regex("""^/compact\b(.*)$""", RegexOption.IGNORE_CASE)
+        val COMPACT_WITHDRAW_REGEX = Regex("""^/compact\s+withdraw\s*$""", RegexOption.IGNORE_CASE)
+        val COMPACT_ARGS_REGEX = Regex("""^/compact\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(hide))?\s*$""", RegexOption.IGNORE_CASE)
         private val RANGE_TOKEN_REGEX = Regex("""(\d+)(?:\s*-\s*(\d+))?""")
 
         fun isHideCommand(text: String): Boolean {
@@ -1393,11 +1426,50 @@ class ChatService(
         }
     }
 
-    suspend fun executeCompactCommand(conversationId: Uuid, commandText: String): CompactCommandResult {
-        val trimmed = commandText.trim()
-        val match = COMPACT_CMD_REGEX.matchEntire(trimmed)
-            ?: return CompactCommandResult(false, "无效指令")
+    suspend fun executeCompactWithdraw(conversationId: Uuid): CompactCommandResult {
+        val checkpoint = checkpointRepository.getLatest(conversationId)
+            ?: return CompactCommandResult(false, "当前会话没有可撤销的压缩记录")
 
+        val restoredFloors = if (checkpoint.autoHiddenFloors.isNotBlank()) {
+            checkpoint.autoHiddenFloors.split(",")
+                .mapNotNull { it.trim().toIntOrNull() }
+                .toSet()
+        } else emptySet()
+
+        if (restoredFloors.isNotEmpty()) {
+            mutate(conversationId) { conv ->
+                val indicesToRestore = restoredFloors.map { it - 1 }.toSet()
+                conv.copy(
+                    messageNodes = conv.messageNodes.mapIndexed { idx, node ->
+                        if (idx in indicesToRestore) {
+                            node.copy(messages = node.messages.map { it.copy(isHidden = false) })
+                        } else node
+                    }
+                )
+            }
+        }
+
+        checkpointRepository.delete(checkpoint.id)
+
+        val msg = if (restoredFloors.isNotEmpty()) {
+            val minF = restoredFloors.minOrNull() ?: 1
+            val maxF = restoredFloors.maxOrNull() ?: 1
+            "已撤销压缩并恢复第 $minF-$maxF 层楼层"
+        } else {
+            "已撤销压缩记录"
+        }
+        return CompactCommandResult(true, msg)
+    }
+
+    suspend fun executeCompact(
+        conversationId: Uuid,
+        startFloor: Int,
+        endFloor: Int,
+        targetTokensK: Int,
+        model: Model,
+        compressPrompt: String,
+        autoHide: Boolean,
+    ): CompactCommandResult {
         val session = sessionManager.getOrCreate(conversationId)
         if (session.isGenerating) {
             return CompactCommandResult(false, "正在生成中，无法压缩")
@@ -1409,30 +1481,14 @@ class ChatService(
             return CompactCommandResult(false, "没有可压缩的对话记录")
         }
 
-        val args = match.groupValues[1].trim()
-        val targetFloorArg = args.toIntOrNull()
-        val boundaryFloor = targetFloorArg ?: nodes.size
-
-        if (boundaryFloor <= 0 || boundaryFloor > nodes.size) {
-            return CompactCommandResult(false, "指定楼层不存在（当前会话共 ${nodes.size} 层）")
+        if (startFloor < 1 || startFloor > nodes.size) {
+            return CompactCommandResult(false, "起始楼层超出范围（当前会话共 ${nodes.size} 层）")
+        }
+        if (endFloor < startFloor || endFloor > nodes.size) {
+            return CompactCommandResult(false, "结尾楼层超出范围（当前会话共 ${nodes.size} 层）")
         }
 
-        val settings = settingsStore.awaitLoaded()
-        val turn = requestFactory.createContext(settings, conversation)
-
-        // 非 ST 预设助手：严格保留原生方案
-        if (turn.stPreset == null) {
-            val result = compressConversation(conversationId, "")
-            return if (result.isSuccess) {
-                CompactCommandResult(true, "已压缩对话历史", boundaryFloor = boundaryFloor)
-            } else {
-                CompactCommandResult(false, result.exceptionOrNull()?.message ?: "压缩失败")
-            }
-        }
-
-        // ST 预设助手：四段结构化压缩与检查点
-        val candidateNodes = nodes.take(boundaryFloor)
-        // 压缩前降噪（Pre-compaction Pruning）：过滤被隐藏的消息
+        val candidateNodes = nodes.subList(startFloor - 1, endFloor)
         val nonHiddenNodes = candidateNodes.filterNot { it.currentMessage.isHidden }
         val messagesToSummarize = nonHiddenNodes.map { it.currentMessage }
         if (messagesToSummarize.isEmpty()) {
@@ -1442,22 +1498,49 @@ class ChatService(
         val boundaryNode = candidateNodes.last()
         val boundaryNodeId = boundaryNode.id.toString()
 
+        val settings = settingsStore.awaitLoaded()
+        val provider = model.findProvider(settings.providers)
+            ?: return CompactCommandResult(false, "未找到模型对应的服务商配置")
+
         return runCatching {
             val originalTokens = messagesToSummarize.sumOf { (it.toText().length * 0.75).toInt().coerceAtLeast(1) }
-            val summary = requestFactory.generateCompressionSummary(
-                turn = turn,
+            val summary = requestFactory.generateIsolatedCompressionSummary(
+                model = model,
+                provider = provider,
                 messages = messagesToSummarize,
-                compressPrompt = ST_COMPACT_PROMPT,
+                compressPrompt = compressPrompt,
+                targetTokensK = targetTokensK,
+                assistantId = conversation.assistantId,
+                conversationId = conversationId,
+                settings = settings,
             )
             val compressedTokens = (summary.length * 0.75).toInt().coerceAtLeast(1)
 
+            val autoHiddenList = if (autoHide) (startFloor..endFloor).toList() else emptyList()
+            val autoHiddenStr = autoHiddenList.joinToString(",")
+
+            if (autoHide) {
+                mutate(conversationId) { conv ->
+                    val validIndices = (startFloor - 1 until endFloor).toSet()
+                    conv.copy(
+                        messageNodes = conv.messageNodes.mapIndexed { idx, node ->
+                            if (idx in validIndices) {
+                                node.copy(messages = node.messages.map { it.copy(isHidden = true) })
+                            } else node
+                        }
+                    )
+                }
+            }
+
             val checkpoint = ConversationCheckpointEntity(
                 conversationId = conversationId.toString(),
+                startFloor = startFloor,
+                boundaryFloor = endFloor,
                 boundaryNodeId = boundaryNodeId,
-                boundaryFloor = boundaryFloor,
                 summaryContent = summary,
                 originalTokens = originalTokens,
                 compressedTokens = compressedTokens,
+                autoHiddenFloors = autoHiddenStr,
                 createdAt = System.currentTimeMillis(),
             )
             checkpointRepository.saveCheckpoint(checkpoint)
@@ -1466,8 +1549,8 @@ class ChatService(
             val compStr = if (compressedTokens >= 1000) "${compressedTokens / 1000}K" else "$compressedTokens"
             CompactCommandResult(
                 success = true,
-                message = "早期对话已压缩为背景记忆 ($origStr → $compStr，已压缩 $boundaryFloor 轮)",
-                boundaryFloor = boundaryFloor,
+                message = "第 $startFloor-$endFloor 轮对话已压缩 ($origStr → $compStr${if (autoHide) "，已自动隐藏" else ""})",
+                boundaryFloor = endFloor,
                 originalTokens = originalTokens,
                 compressedTokens = compressedTokens,
             )
@@ -1476,24 +1559,73 @@ class ChatService(
             CompactCommandResult(false, error.message ?: "压缩失败")
         }
     }
+
+    suspend fun executeCompactCommand(conversationId: Uuid, commandText: String): CompactCommandResult {
+        val trimmed = commandText.trim()
+        if (COMPACT_WITHDRAW_REGEX.matches(trimmed)) {
+            return executeCompactWithdraw(conversationId)
+        }
+
+        val argsMatch = COMPACT_ARGS_REGEX.matchEntire(trimmed)
+        if (argsMatch != null) {
+            val startFloor = argsMatch.groupValues[1].toIntOrNull() ?: 1
+            val endFloor = argsMatch.groupValues[2].toIntOrNull() ?: 1
+            val targetTokensK = argsMatch.groupValues[3].toIntOrNull() ?: 2
+            val autoHide = argsMatch.groupValues[4].equals("hide", ignoreCase = true)
+
+            val settings = settingsStore.awaitLoaded()
+            val session = sessionManager.getOrCreate(conversationId)
+            val conversation = session.state.value
+            val model = settings.getChatModelOf(conversation)
+                ?: settings.findModelById(settings.chatModelId)
+                ?: return CompactCommandResult(false, "未选择对话模型")
+
+            return executeCompact(
+                conversationId = conversationId,
+                startFloor = startFloor,
+                endFloor = endFloor,
+                targetTokensK = targetTokensK,
+                model = model,
+                compressPrompt = DEFAULT_COMPACT_PROMPT,
+                autoHide = autoHide,
+            )
+        }
+
+        // 单数字楼层容错：/compact 10
+        val singleMatch = COMPACT_CMD_REGEX.matchEntire(trimmed)
+        val args = singleMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
+        val floorNum = args.toIntOrNull()
+        if (floorNum != null) {
+            val settings = settingsStore.awaitLoaded()
+            val session = sessionManager.getOrCreate(conversationId)
+            val conversation = session.state.value
+            val model = settings.getChatModelOf(conversation)
+                ?: settings.findModelById(settings.chatModelId)
+                ?: return CompactCommandResult(false, "未选择对话模型")
+            return executeCompact(
+                conversationId = conversationId,
+                startFloor = 1,
+                endFloor = floorNum,
+                targetTokensK = 2,
+                model = model,
+                compressPrompt = DEFAULT_COMPACT_PROMPT,
+                autoHide = false,
+            )
+        }
+
+        return CompactCommandResult(
+            false,
+            "指令格式错误。示例:\n/compact 起始 结尾 目标大小 [hide]\n/compact withdraw"
+        )
+    }
 }
 
-private const val ST_COMPACT_PROMPT = """你是一个专业的小说与角色扮演上下文总结引擎。
-请将以下历史对话记录进行高度凝练的结构化总结，目标是将冗长的对话压缩为高密度、保留全部核心事实的大纲。
+const val DEFAULT_COMPACT_PROMPT = """你是一个专业的内容摘要与上下文压缩引擎。
+请将以下历史对话记录进行高密度、结构化的精炼总结，目标压缩至约 {targetK}K tokens 以内。
 
-输出必须严格按照以下四个结构化区块输出，不要任何多余前言：
-<timeline_events>
-[核心剧情事件推进线：按时间顺序记载发生了什么、谁做出了什么关键动作]
-</timeline_events>
-
-<character_relationships>
-[角色关系与状态变动：态度变化、羁绊建立、当前角色的物理状态与位置]
-</character_relationships>
-
-<agreements_and_promises>
-[关键承诺与契约：彼此达成的协定、获得的物品/线索、既成事实]
-</agreements_and_promises>
-
-<open_threads>
-[未完待续与伏笔：正在进行的目标、尚未解决的危机、悬而未决的问题]
-</open_threads>"""
+要求：
+1. 提取并保留所有核心事实、关键决策、重要细节与上下文背景。
+2. 记录角色关系、立场态度变化与当前所处状态。
+3. 准确记录已达成的约定、承诺、获得的物品与线索。
+4. 记录未完成的任务目标与悬而未决的问题。
+5. 去除所有客套寒暄与冗余细节，语言凝练紧凑，不要添加无关的开场白或解释。"""

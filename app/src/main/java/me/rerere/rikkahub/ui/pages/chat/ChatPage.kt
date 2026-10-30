@@ -75,7 +75,10 @@ import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.SearchMode
+import me.rerere.rikkahub.ui.components.ai.completion.CommandCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
+import me.rerere.rikkahub.ui.components.chat.CompactDialog
+import me.rerere.rikkahub.ui.components.chat.FloorHideSheet
 import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -302,16 +305,22 @@ private fun ChatPageContent(
         currentChatModel?.findProvider(setting.providers) is ProviderSetting.Google
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
-        assistant.workspaceId?.let { workspaceId ->
-            listOf(
-                WorkspaceCompletionProvider(
-                    workspaceId = workspaceId.toString(),
-                    repository = workspaceRepository,
-                    currentCwd = conversation.workspaceCwd,
+        buildList {
+            add(CommandCompletionProvider())
+            assistant.workspaceId?.let { workspaceId ->
+                add(
+                    WorkspaceCompletionProvider(
+                        workspaceId = workspaceId.toString(),
+                        repository = workspaceRepository,
+                        currentCwd = conversation.workspaceCwd,
+                    )
                 )
-            )
-        }.orEmpty()
+            }
+        }
     }
+
+    var showCompactDialog by remember { mutableStateOf(false) }
+    var showFloorHideSheet by remember { mutableStateOf(false) }
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
 
@@ -366,6 +375,13 @@ private fun ChatPageContent(
                     onSendClick = {
                         val text = inputState.textContent.text.toString().trim()
                         if (!inputState.isEditing() && ChatService.isHideCommand(text)) {
+                            val hideMatch = ChatService.HIDE_CMD_REGEX.matchEntire(text)
+                            val args = hideMatch?.groupValues?.getOrNull(2)?.trim().orEmpty()
+                            if (args.isEmpty()) {
+                                showFloorHideSheet = true
+                                inputState.clearInput()
+                                return@ChatInput
+                            }
                             vm.executeHideCommand(text) { success, message ->
                                 toaster.show(message, type = if (success) ToastType.Success else ToastType.Warning)
                             }
@@ -373,6 +389,13 @@ private fun ChatPageContent(
                             return@ChatInput
                         }
                         if (!inputState.isEditing() && ChatService.isCompactCommand(text)) {
+                            val compactMatch = ChatService.COMPACT_CMD_REGEX.matchEntire(text)
+                            val args = compactMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                            if (args.isEmpty()) {
+                                showCompactDialog = true
+                                inputState.clearInput()
+                                return@ChatInput
+                            }
                             vm.executeCompactCommand(text) { success, message ->
                                 toaster.show(message, type = if (success) ToastType.Success else ToastType.Warning)
                             }
@@ -400,6 +423,13 @@ private fun ChatPageContent(
                     onLongSendClick = {
                         val text = inputState.textContent.text.toString().trim()
                         if (!inputState.isEditing() && ChatService.isHideCommand(text)) {
+                            val hideMatch = ChatService.HIDE_CMD_REGEX.matchEntire(text)
+                            val args = hideMatch?.groupValues?.getOrNull(2)?.trim().orEmpty()
+                            if (args.isEmpty()) {
+                                showFloorHideSheet = true
+                                inputState.clearInput()
+                                return@ChatInput
+                            }
                             vm.executeHideCommand(text) { success, message ->
                                 toaster.show(message, type = if (success) ToastType.Success else ToastType.Warning)
                             }
@@ -407,6 +437,13 @@ private fun ChatPageContent(
                             return@ChatInput
                         }
                         if (!inputState.isEditing() && ChatService.isCompactCommand(text)) {
+                            val compactMatch = ChatService.COMPACT_CMD_REGEX.matchEntire(text)
+                            val args = compactMatch?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                            if (args.isEmpty()) {
+                                showCompactDialog = true
+                                inputState.clearInput()
+                                return@ChatInput
+                            }
                             vm.executeCompactCommand(text) { success, message ->
                                 toaster.show(message, type = if (success) ToastType.Success else ToastType.Warning)
                             }
@@ -516,6 +553,59 @@ private fun ChatPageContent(
                 attachmentPickerActions = attachmentPickerActions,
                 onStartVoiceMode = onStartVoiceMode,
                 onDismiss = { showFilesSheet = false },
+            )
+        }
+
+        if (showCompactDialog) {
+            CompactDialog(
+                conversation = conversation,
+                settings = setting,
+                currentModel = currentChatModel,
+                onDismiss = { showCompactDialog = false },
+                onConfirm = { startFloor, endFloor, targetK, model, prompt, autoHide ->
+                    vm.executeCompact(
+                        startFloor = startFloor,
+                        endFloor = endFloor,
+                        targetTokensK = targetK,
+                        model = model,
+                        compressPrompt = prompt,
+                        autoHide = autoHide,
+                    ) { success, msg ->
+                        toaster.show(msg, type = if (success) ToastType.Success else ToastType.Warning)
+                        if (success) {
+                            showCompactDialog = false
+                        }
+                    }
+                }
+            )
+        }
+
+        if (showFloorHideSheet) {
+            FloorHideSheet(
+                conversation = conversation,
+                onDismiss = { showFloorHideSheet = false },
+                onHideRange = { rangeText, isHide ->
+                    val cmd = "/${if (isHide) "hide" else "unhide"} $rangeText"
+                    vm.executeHideCommand(cmd) { success, msg ->
+                        toaster.show(msg, type = if (success) ToastType.Success else ToastType.Warning)
+                    }
+                },
+                onToggleHideFloor = { floorIndex ->
+                    val node = conversation.messageNodes.getOrNull(floorIndex)
+                    if (node != null) {
+                        vm.toggleHideMessage(node.currentMessage.id)
+                    }
+                },
+                onBatchSetHidden = { indices, isHide ->
+                    vm.batchSetFloorsHidden(indices, isHide) { success, msg ->
+                        toaster.show(msg, type = if (success) ToastType.Success else ToastType.Warning)
+                    }
+                },
+                onJumpToMessage = { index ->
+                    scope.launch {
+                        chatListState.requestScrollToItem(index)
+                    }
+                }
             )
         }
     }

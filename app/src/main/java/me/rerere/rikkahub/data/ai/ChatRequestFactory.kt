@@ -137,19 +137,11 @@ class ChatRequestFactory(
         if (assistant.stPresetId != null && stPreset == null) {
             Log.w(TAG, "ST preset ${assistant.stPresetId} is missing or disabled; falling back to legacy prompts")
         }
-        val checkpoint = if (stPreset != null) {
-            checkpointRepository.getLatest(conversation.id)
-        } else {
-            null
-        }
-        val milestoneMessageIds = if (stPreset != null) {
-            conversation.messageNodes
-                .filter { it.isFavorite }
-                .map { it.currentMessage.id.toString() }
-                .toSet()
-        } else {
-            emptySet()
-        }
+        val checkpoint = checkpointRepository.getLatest(conversation.id)
+        val milestoneMessageIds = conversation.messageNodes
+            .filter { it.isFavorite }
+            .map { it.currentMessage.id.toString() }
+            .toSet()
         return ChatTurnContext(
             settings = settings,
             assistant = assistant,
@@ -220,6 +212,50 @@ class ChatRequestFactory(
      * 前缀与上一轮对话一致，可以命中提示词缓存，模型也能看到工具调用和结果。
      * 工具定义必须保留：它属于请求前缀，去掉或改动 tool_choice 都会让缓存失效。
      */
+    suspend fun generateIsolatedCompressionSummary(
+        model: Model,
+        provider: ProviderSetting,
+        messages: List<UIMessage>,
+        compressPrompt: String,
+        targetTokensK: Int,
+        assistantId: Uuid,
+        conversationId: Uuid,
+        settings: Settings,
+    ): String {
+        val effectivePrompt = compressPrompt
+            .replace("{targetTokens}", targetTokensK.toString())
+            .replace("{targetK}", targetTokensK.toString())
+
+        val requestMessages = buildList {
+            add(UIMessage.system(prompt = effectivePrompt))
+            messages.forEach { msg ->
+                add(UIMessage(role = msg.role, parts = msg.parts))
+            }
+            add(UIMessage.user("请基于上述历史记录生成压缩总结，严格控制在约 ${targetTokensK}K tokens 以内。"))
+        }
+
+        val result = withRetry(
+            policy = settings.retryPolicy(),
+            onRetry = { Log.w(TAG, "Compression request failed, retrying in ${it.delay}", it.cause) },
+        ) {
+            usageRecorder.wrap(
+                providerManager.getProviderByType(provider),
+                UsageTag(UsageSource.COMPRESSION, assistantId, conversationId),
+            ).generateText(
+                providerSetting = provider,
+                messages = requestMessages,
+                params = TextGenerationParams(
+                    model = model,
+                    temperature = 0.3f,
+                    sessionId = conversationId.toString(),
+                ),
+            )
+        }
+        val summary = result.message.compressionSummaryOrNull()
+            ?: result.message.toText().trim()
+        return summary.ifBlank { error("压缩模型返回内容为空") }
+    }
+
     suspend fun generateCompressionSummary(
         turn: ChatTurnContext,
         messages: List<UIMessage>,
@@ -284,7 +320,31 @@ class ChatRequestFactory(
             if (system.isNotBlank()) {
                 add(UIMessage.system(prompt = system).copy(isSynthetic = true))
             }
-            addAll(messages.limitContext(assistant.contextMessageLimit))
+            if (turn.checkpoint != null) {
+                val cpPrompt = """
+                    <conversation_summary>
+                    [以下是历史会话（第 ${turn.checkpoint.startFloor} 轮至第 ${turn.checkpoint.boundaryFloor} 轮）的核心大纲与背景记忆，请将其视为既定事实并在此基础上继续对话]
+                    ${turn.checkpoint.summaryContent}
+                    </conversation_summary>
+                """.trimIndent()
+                add(UIMessage.system(prompt = cpPrompt).copy(isSynthetic = true))
+            }
+            val effectiveMessages = if (turn.checkpoint != null) {
+                val cp = turn.checkpoint
+                val startIdx = (cp.startFloor - 1).coerceAtLeast(0)
+                val endIdx = cp.boundaryFloor.coerceAtMost(messages.size)
+                val before = if (startIdx > 0 && startIdx <= messages.size) messages.take(startIdx) else emptyList()
+                val middleMilestones = if (startIdx < endIdx) {
+                    messages.subList(startIdx, endIdx).filter { msg ->
+                        turn.milestoneMessageIds.contains(msg.id.toString())
+                    }
+                } else emptyList()
+                val after = if (endIdx < messages.size) messages.drop(endIdx) else emptyList()
+                before + middleMilestones + after
+            } else {
+                messages
+            }
+            addAll(effectiveMessages.limitContext(assistant.contextMessageLimit))
         }.transforms(
             transformers = inputTransformers,
             context = context,

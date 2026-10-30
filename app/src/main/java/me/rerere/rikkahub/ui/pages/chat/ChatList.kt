@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.selection.SelectionContainer
 import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
@@ -9,8 +10,10 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ArrowDownDouble
 import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.CursorPointer01
+import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -303,14 +306,28 @@ private fun ChatListNormal(
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
     var isCheckpointExpanded by rememberSaveable(checkpoint?.id) { mutableStateOf(false) }
-    val visibleNodesWithIndex = remember(conversation.messageNodes, checkpoint, isCheckpointExpanded) {
-        conversation.messageNodes.mapIndexed { index, node -> index to node }.filter { (index, _) ->
-            if (checkpoint != null && !isCheckpointExpanded) {
-                index >= checkpoint.boundaryFloor
-            } else {
-                true
-            }
-        }
+
+    val startIdx = remember(checkpoint) {
+        checkpoint?.let { (it.startFloor - 1).coerceAtLeast(0) } ?: 0
+    }
+    val endIdx = remember(checkpoint, conversation.messageNodes.size) {
+        checkpoint?.let { (it.boundaryFloor - 1).coerceAtMost(conversation.messageNodes.lastIndex) } ?: 0
+    }
+
+    val nodesBefore = remember(conversation.messageNodes, checkpoint, startIdx) {
+        if (checkpoint != null) {
+            conversation.messageNodes.mapIndexed { idx, node -> idx to node }.filter { it.first < startIdx }
+        } else emptyList()
+    }
+    val nodesCompacted = remember(conversation.messageNodes, checkpoint, startIdx, endIdx) {
+        if (checkpoint != null) {
+            conversation.messageNodes.mapIndexed { idx, node -> idx to node }.filter { it.first in startIdx..endIdx }
+        } else emptyList()
+    }
+    val nodesAfter = remember(conversation.messageNodes, checkpoint, endIdx) {
+        if (checkpoint != null) {
+            conversation.messageNodes.mapIndexed { idx, node -> idx to node }.filter { it.first > endIdx }
+        } else emptyList()
     }
 
     Box(
@@ -359,20 +376,7 @@ private fun ChatListNormal(
                     .topFadingEdge(innerPadding.calculateTopPadding() + 24.dp)
                     .hazeSource(state = hazeState),
             ) {
-            if (checkpoint != null) {
-                item(key = "checkpoint_${checkpoint.id}") {
-                    CheckpointFoldCard(
-                        checkpoint = checkpoint,
-                        isExpanded = isCheckpointExpanded,
-                        onToggleExpand = { isCheckpointExpanded = !isCheckpointExpanded },
-                    )
-                }
-            }
-
-            items(
-                items = visibleNodesWithIndex,
-                key = { (_, item) -> item.id },
-            ) { (index, node) ->
+            val renderMessageNodeItem: @Composable (Int, MessageNode) -> Unit = { index, node ->
                 Column {
                     ListSelectableItem(
                         key = node.id,
@@ -406,7 +410,7 @@ private fun ChatListNormal(
                                 onDelete(node.currentMessage)
                             },
                             onShare = {
-                                selecting = true  // 使用 CoroutineScope 延迟状态更新
+                                selecting = true
                                 selectedItems.clear()
                                 selectedItems.addAll(conversation.messageNodes.map { it.id }
                                     .subList(0, conversation.messageNodes.indexOf(node) + 1))
@@ -426,6 +430,46 @@ private fun ChatListNormal(
                             lastMessage = index == lastMessageIndex,
                         )
                     }
+                }
+            }
+
+            if (checkpoint == null) {
+                items(
+                    items = conversation.messageNodes.mapIndexed { index, node -> index to node },
+                    key = { (_, item) -> item.id },
+                ) { (index, node) ->
+                    renderMessageNodeItem(index, node)
+                }
+            } else {
+                items(
+                    items = nodesBefore,
+                    key = { (_, item) -> item.id },
+                ) { (index, node) ->
+                    renderMessageNodeItem(index, node)
+                }
+
+                item(key = "checkpoint_${checkpoint.id}") {
+                    CompactedSummaryCard(
+                        checkpoint = checkpoint,
+                        isExpanded = isCheckpointExpanded,
+                        onToggleExpand = { isCheckpointExpanded = !isCheckpointExpanded },
+                    )
+                }
+
+                if (isCheckpointExpanded) {
+                    items(
+                        items = nodesCompacted,
+                        key = { (_, item) -> item.id },
+                    ) { (index, node) ->
+                        renderMessageNodeItem(index, node)
+                    }
+                }
+
+                items(
+                    items = nodesAfter,
+                    key = { (_, item) -> item.id },
+                ) { (index, node) ->
+                    renderMessageNodeItem(index, node)
                 }
             }
 
@@ -912,7 +956,7 @@ private fun formatTokens(tokens: Int): String =
     if (tokens >= 1000) "${tokens / 1000}K" else "$tokens"
 
 @Composable
-private fun CheckpointFoldCard(
+private fun CompactedSummaryCard(
     checkpoint: ConversationCheckpointEntity,
     isExpanded: Boolean,
     onToggleExpand: () -> Unit,
@@ -921,48 +965,57 @@ private fun CheckpointFoldCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
         Column(
             modifier = Modifier
-                .clickable { onToggleExpand() }
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onToggleExpand() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = "🗜️",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = "早期对话已压缩为背景记忆",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Icon(
+                    imageVector = HugeIcons.Package01,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
                 Text(
-                    text = if (isExpanded) "点击折叠" else "展开回看原文",
+                    text = "已压缩第 ${checkpoint.startFloor}-${checkpoint.boundaryFloor} 轮对话",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Icon(
+                    imageVector = if (isExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = if (isExpanded) "收起原文" else "展开原文",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            Text(
-                text = "${formatTokens(checkpoint.originalTokens)} → ${formatTokens(checkpoint.compressedTokens)}，已折叠 ${checkpoint.boundaryFloor} 轮",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-            )
+
+            // 居中展示压缩得到的摘要正文（Markdown 格式，不显示字数、楼层、tokens 等信息）
+            SelectionContainer {
+                MarkdownBlock(
+                    content = checkpoint.summaryContent,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
