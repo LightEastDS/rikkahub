@@ -2073,9 +2073,6 @@ private fun StPromptEditRow(
                             Text(stringResource(R.string.prompt_page_st_preset_in_chat_depth, prompt.injectionDepth))
                         }
                     }
-                    if (row.pairedPrompt != null) {
-                        Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_paired_marker)) }
-                    }
                     if (protected) {
                         Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_protected)) }
                     }

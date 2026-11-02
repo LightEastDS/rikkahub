@@ -529,11 +529,12 @@ class StPromptAssemblerTest {
     }
 
     @Test
-    fun `editablePrompts merges paired worldInfoBefore and worldInfoAfter into single placeholder`() {
+    fun `editablePrompts keeps worldInfoBefore and worldInfoAfter as independent entries`() {
         val preset = preset(
             prompts = listOf(
                 p("main", marker = true),
                 p("worldInfoBefore", marker = true).copy(name = "World Info (before)"),
+                p("personaDescription", marker = true).copy(name = "Persona Description"),
                 p("chatHistory", marker = true),
                 p("worldInfoAfter", marker = true).copy(name = "World Info (after)"),
                 p("jailbreak", "JB"),
@@ -541,15 +542,19 @@ class StPromptAssemblerTest {
             order = listOf(
                 StPromptOrderEntry("main", true),
                 StPromptOrderEntry("worldInfoBefore", true),
+                StPromptOrderEntry("personaDescription", true),
                 StPromptOrderEntry("chatHistory", true),
                 StPromptOrderEntry("worldInfoAfter", true),
                 StPromptOrderEntry("jailbreak", true),
             ),
         )
         val rows = StPromptAssembler.editablePrompts(preset)
-        assertEquals(listOf("main", "worldInfoBefore", "chatHistory", "jailbreak"), rows.map { it.prompt.identifier })
-        assertEquals(listOf(0, 1, 2, 3), rows.map { it.orderIndex })
-        assertEquals("worldInfoAfter", rows[1].pairedPrompt?.identifier)
-        assertEquals("World Info (before & after)", rows[1].prompt.name)
+        assertEquals(
+            listOf("main", "worldInfoBefore", "personaDescription", "chatHistory", "worldInfoAfter", "jailbreak"),
+            rows.map { it.prompt.identifier },
+        )
+        assertEquals(listOf(0, 1, 2, 3, 4, 5), rows.map { it.orderIndex })
+        assertEquals("World Info (before)", rows[1].prompt.name)
+        assertEquals("World Info (after)", rows[4].prompt.name)
     }
 }

@@ -548,7 +548,6 @@ object StPromptAssembler {
 
     /**
      * 详情页编辑列表：先按当前顺序列出，再把未挂到 prompt_order 的提示追加到末尾。
-     * 成对的 marker（如 worldInfoBefore 与 worldInfoAfter）合并为一个占位符条目显示。
      */
     fun editablePrompts(preset: StPreset): List<StPromptRow> {
         val bucket = chooseBucket(preset, mutableListOf())
@@ -556,51 +555,15 @@ object StPromptAssembler {
         val entries = bucket.order.ifEmpty {
             preset.prompts.map { StPromptOrderEntry(it.identifier, true) }
         }
-        val pairedMarkers = StPresetMarkers.resolvePairedMarkers(preset.prompts)
-        val secondarySet = pairedMarkers.values.toSet()
-
         val rows = mutableListOf<StPromptRow>()
         val inOrder = mutableSetOf<String>()
-        entries.forEach { entry ->
+        entries.forEachIndexed { index, entry ->
             inOrder += entry.identifier
-            if (entry.identifier in secondarySet) {
-                return@forEach
-            }
-            val prompt = promptMap[entry.identifier] ?: return@forEach
-            val rowOrderIndex = rows.size
-            val secondaryId = pairedMarkers[entry.identifier]
-            val secondaryPrompt = secondaryId?.let { promptMap[it] }
-            if (secondaryPrompt != null) {
-                inOrder += secondaryPrompt.identifier
-                val mergedPrompt = prompt.copy(
-                    name = StPresetMarkers.mergePairedMarkerName(prompt, secondaryPrompt)
-                )
-                rows += StPromptRow(
-                    prompt = mergedPrompt,
-                    orderIndex = rowOrderIndex,
-                    enabled = entry.enabled,
-                    pairedPrompt = secondaryPrompt,
-                )
-            } else {
-                rows += StPromptRow(prompt, rowOrderIndex, entry.enabled)
-            }
+            val prompt = promptMap[entry.identifier] ?: return@forEachIndexed
+            rows += StPromptRow(prompt, index, entry.enabled)
         }
-        preset.prompts.filter { it.identifier !in inOrder && it.identifier !in secondarySet }.forEach { prompt ->
-            val secondaryId = pairedMarkers[prompt.identifier]
-            val secondaryPrompt = secondaryId?.let { promptMap[it] }
-            if (secondaryPrompt != null) {
-                val mergedPrompt = prompt.copy(
-                    name = StPresetMarkers.mergePairedMarkerName(prompt, secondaryPrompt)
-                )
-                rows += StPromptRow(
-                    prompt = mergedPrompt,
-                    orderIndex = null,
-                    enabled = false,
-                    pairedPrompt = secondaryPrompt,
-                )
-            } else {
-                rows += StPromptRow(prompt, null, false)
-            }
+        preset.prompts.filter { it.identifier !in inOrder }.forEach { prompt ->
+            rows += StPromptRow(prompt, null, false)
         }
         return rows
     }

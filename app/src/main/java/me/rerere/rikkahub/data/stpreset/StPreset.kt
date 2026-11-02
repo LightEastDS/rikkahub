@@ -64,12 +64,11 @@ data class StPromptOrderEntry(
     val enabled: Boolean = true,
 )
 
-/** 预设详情页的一行：在 prompt_order 里的条目带 [orderIndex]，未挂载的为 null。成对合并的 marker 附带 [pairedPrompt]。 */
+/** 预设详情页的一行：在 prompt_order 里的条目带 [orderIndex]，未挂载的为 null。 */
 data class StPromptRow(
     val prompt: StPrompt,
     val orderIndex: Int?,
     val enabled: Boolean,
-    val pairedPrompt: StPrompt? = null,
 )
 
 /** 结构性 marker：不允许在 UI 里停用，保证上下文/世界书永远有插入点。 */
@@ -81,53 +80,7 @@ object StPresetMarkers {
         "chatHistory",
     )
 
-    /** 成对的 marker（primary -> secondary），在预设条目列表中合并为一个占位符展示与调整。 */
-    val PAIRED_MARKERS: Map<String, String> = mapOf(
-        "worldInfoBefore" to "worldInfoAfter",
-    )
-
     fun isProtected(identifier: String): Boolean = identifier in PROTECTED
-
-    /** 返回在当前 prompts 列表中存在的所有成对 marker 映射（primary -> secondary）。 */
-    fun resolvePairedMarkers(prompts: List<StPrompt>): Map<String, String> {
-        val markerSet = prompts.filter { it.marker }.map { it.identifier }.toSet()
-        val result = linkedMapOf<String, String>()
-        PAIRED_MARKERS.forEach { (primary, secondary) ->
-            if (primary in markerSet && secondary in markerSet) {
-                result[primary] = secondary
-            }
-        }
-        markerSet.forEach { id ->
-            when {
-                id.endsWith("Before") -> {
-                    val sec = id.removeSuffix("Before") + "After"
-                    if (sec in markerSet) result.putIfAbsent(id, sec)
-                }
-                id.endsWith("_before", ignoreCase = true) -> {
-                    val prefix = id.substring(0, id.length - "_before".length)
-                    val sec = markerSet.firstOrNull { it.equals("${prefix}_after", ignoreCase = true) }
-                    if (sec != null) result.putIfAbsent(id, sec)
-                }
-            }
-        }
-        return result
-    }
-
-    fun mergePairedMarkerName(primary: StPrompt, secondary: StPrompt): String {
-        val pName = primary.name.ifBlank { primary.identifier }
-        val sName = secondary.name.ifBlank { secondary.identifier }
-        if (pName.equals("World Info (before)", ignoreCase = true) && sName.equals("World Info (after)", ignoreCase = true)) {
-            return "World Info (before & after)"
-        }
-        if (pName.equals("worldInfoBefore", ignoreCase = true) && sName.equals("worldInfoAfter", ignoreCase = true)) {
-            return "worldInfo (before & after)"
-        }
-        val beforeRegex = Regex("""\(\s*before\s*\)""", RegexOption.IGNORE_CASE)
-        if (beforeRegex.containsMatchIn(pName)) {
-            return beforeRegex.replace(pName, "(before & after)")
-        }
-        return "$pName / $sName"
-    }
 }
 
 @Serializable
