@@ -116,6 +116,7 @@ import me.rerere.rikkahub.data.repository.StPresetRecord
 import me.rerere.rikkahub.data.stpreset.StMacroResolver
 import me.rerere.rikkahub.data.stpreset.StPromptAssembler
 import me.rerere.rikkahub.data.stpreset.StPromptRow
+import me.rerere.rikkahub.data.stpreset.StPromptZone
 import me.rerere.rikkahub.data.stpreset.StPresetMarkers
 import me.rerere.rikkahub.data.stpreset.StPresetParser
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
@@ -1595,7 +1596,7 @@ private fun StPresetEditSheet(
     var showInspect by remember { mutableStateOf(false) }
     var editingRow by remember { mutableStateOf<StPromptRow?>(null) }
     val declaredVariables = remember(preset) {
-        StMacroResolver.preScanVariables(preset.prompts)
+        StMacroResolver.preScanVariables(preset)
     }
     var userVariables by remember(preset.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     LaunchedEffect(preset.id) {
@@ -1799,20 +1800,44 @@ private fun StPresetEditSheet(
                 }
 
                 item {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Text(
-                            text = stringResource(R.string.prompt_page_entries_format, mountedRows.size),
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = stringResource(R.string.prompt_page_st_preset_drag_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = stringResource(R.string.prompt_page_entries_format, mountedRows.size),
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = stringResource(R.string.prompt_page_st_preset_drag_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        val zoneACount = mountedRows.count { it.zone == StPromptZone.ZONE_A }
+                        val zoneACCount = mountedRows.count { it.zone == StPromptZone.ZONE_A_AND_C }
+                        val zoneBCount = mountedRows.count { it.zone == StPromptZone.ZONE_B }
+                        val zoneCCount = mountedRows.count { it.zone == StPromptZone.ZONE_C }
+                        val varOnlyCount = mountedRows.count { it.zone == StPromptZone.VARIABLE_ONLY }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Tag(type = TagType.SUCCESS) { Text("Zone A 静态缓存: $zoneACount") }
+                            if (zoneACCount > 0) {
+                                Tag(type = TagType.SUCCESS) { Text("Zone A+C 动静分离: $zoneACCount") }
+                            }
+                            Tag(type = TagType.INFO) { Text("Zone B 对话历史: $zoneBCount") }
+                            Tag(type = TagType.WARNING) { Text("Zone C 动态尾部: $zoneCCount") }
+                            if (varOnlyCount > 0) {
+                                Tag(type = TagType.DEFAULT) { Text("变量赋值(不发消息): $varOnlyCount") }
+                            }
+                        }
                     }
                 }
 
@@ -1947,7 +1972,7 @@ private fun StPresetEditSheet(
         val boundAssistant = remember(assistants, preset) {
             assistants.firstOrNull { it.stPresetId == preset.id }
         }
-        val assembly = remember(preset, boundAssistant, personaName, userPersona) {
+        val assembly = remember(preset, boundAssistant, personaName, userPersona, userVariables) {
             StPromptAssembler.assemble(
                 preset = preset,
                 history = listOf(
@@ -1959,6 +1984,8 @@ private fun StPresetEditSheet(
                 personaName = personaName,
                 personaDescription = userPersona,
                 modelName = "preview",
+                variables = userVariables.toMutableMap(),
+                userLockedVariables = userVariables,
             )
         }
         AlertDialog(
@@ -1970,7 +1997,7 @@ private fun StPresetEditSheet(
                         .fillMaxWidth()
                         .heightIn(max = 520.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
                         text = stringResource(
@@ -1983,12 +2010,53 @@ private fun StPresetEditSheet(
                     )
                     if (assembly.messages.isEmpty()) {
                         Text(stringResource(R.string.prompt_page_st_preset_inspect_empty))
-                    }
-                    assembly.messages.forEachIndexed { index, message ->
-                        Text(
-                            text = "${index + 1}. ${message.role.name}: ${message.toText().take(300)}",
-                            style = MaterialTheme.typography.bodySmall,
+                    } else {
+                        val zoneSections = listOf(
+                            Triple("Zone A · 静态前缀区（100% KV 缓存）", TagType.SUCCESS, assembly.zoneAMessages),
+                            Triple("Zone B · 稳定历史区（追加对话流）", TagType.INFO, assembly.zoneBMessages),
+                            Triple("Zone C · 动态后缀区（最新输入与预填充）", TagType.WARNING, assembly.zoneCMessages),
                         )
+                        var globalIdx = 1
+                        zoneSections.forEach { (title, tagType, zoneMsgs) ->
+                            val charCount = zoneMsgs.sumOf { it.toText().length }
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Tag(type = tagType) { Text(title) }
+                                        Text(
+                                            text = "${zoneMsgs.size} 条 · $charCount 字",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (zoneMsgs.isEmpty()) {
+                                        Text(
+                                            text = "（无消息）",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    } else {
+                                        zoneMsgs.forEach { message ->
+                                            Text(
+                                                text = "$globalIdx. [${message.role.name}] ${message.toText().take(260)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                            globalIdx++
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     assembly.report.warnings.forEach { warning ->
                         Text(
@@ -2066,6 +2134,14 @@ private fun StPromptEditRow(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Tag(type = TagType.DEFAULT) { Text(prompt.role.name.lowercase()) }
+                    when (row.zone) {
+                        StPromptZone.ZONE_A -> Tag(type = TagType.SUCCESS) { Text("Zone A · 静态缓存") }
+                        StPromptZone.ZONE_B -> Tag(type = TagType.INFO) { Text("Zone B · 对话历史") }
+                        StPromptZone.ZONE_C -> Tag(type = TagType.WARNING) { Text("Zone C · 动态尾部") }
+                        StPromptZone.ZONE_A_AND_C -> Tag(type = TagType.SUCCESS) { Text("Zone A+C · 动静分离") }
+                        StPromptZone.VARIABLE_ONLY -> Tag(type = TagType.DEFAULT) { Text("变量赋值 · 不发消息") }
+                        StPromptZone.NONE -> {}
+                    }
                     if (prompt.marker) {
                         Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_marker)) }
                     } else if (prompt.isInChat) {
@@ -2079,7 +2155,7 @@ private fun StPromptEditRow(
                     if (!row.enabled && !protected && !notApplicable) {
                         Tag(type = TagType.WARNING) { Text(stringResource(R.string.prompt_page_disabled)) }
                     }
-                    if (notApplicable) {
+                    if (notApplicable && row.zone != StPromptZone.VARIABLE_ONLY) {
                         Tag(type = TagType.WARNING) { Text(stringResource(R.string.prompt_page_st_preset_status_na)) }
                     }
                 }

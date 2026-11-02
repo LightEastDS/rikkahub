@@ -403,6 +403,8 @@ class ChatRequestFactory(
         val character = assistant.characterCard
         val personaName = turn.settings.displaySetting.userNickname
         val personaDescription = turn.settings.displaySetting.userPersona
+        val lastUserText = history.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
+        val lastCharText = history.lastOrNull { it.role == MessageRole.ASSISTANT }?.toText().orEmpty()
         val macroContext = StMacroContext(
             characterName = character?.name.orEmpty(),
             userName = personaName,
@@ -412,10 +414,12 @@ class ChatRequestFactory(
             scenario = character?.scenario.orEmpty(),
             mesExample = character?.mesExample.orEmpty(),
             modelName = turn.model.displayName,
-            input = history.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty(),
+            input = lastUserText,
             lastMessage = history.lastOrNull()?.toText().orEmpty(),
+            lastUserMessage = lastUserText,
+            lastCharMessage = lastCharText,
         )
-        val regexMacroResolver = StMacroResolver(variables, globalVariables)
+        val regexMacroResolver = StMacroResolver(variables, globalVariables, lockedVariables = presetVariables)
         val regexResult = StRegexPipeline.applyToMessages(
             messages = history,
             scripts = preset.regexScripts,
@@ -474,6 +478,7 @@ class ChatRequestFactory(
             milestoneMessageIds = turn.milestoneMessageIds,
             historyAlreadyTrimmed = true,
             variables = variables,
+            userLockedVariables = presetVariables,
             globalVariables = globalVariables,
             flattenSystemMessages = flattenSystemMessages,
         )

@@ -24,39 +24,59 @@ data class StMacroContext(
     val modelName: String = "",
     val input: String = "",
     val lastMessage: String = "",
+    val lastUserMessage: String = input,
+    val lastCharMessage: String = "",
     val original: String = "",
 )
 
 /**
  * SillyTavern 宏引擎的最小可用实现。
  *
- * 支持：角色/用户字段、时间日期、random/pick/roll、会话变量与全局变量、注释。
+ * 支持：角色/用户字段、时间日期、random/pick/roll、会话变量与全局变量（含 setvar/addvar/incvar/decvar）、注释。
  * 未识别的宏会被记录并替换为空串，避免把 `{{...}}` 原样发给模型。
  *
- * [variables] 是当前聊天的变量，[globalVariables] 是跨聊天共享的变量；setvar 按 prompt 顺序执行。
+ * [variables] 是当前聊天的变量，[globalVariables] 是跨聊天共享的变量；setvar/addvar 按 prompt 顺序执行。
+ * [lockedVariables] 是用户在 UI 变量面板中手动覆盖锁定的变量，不会被预设内置的默认 setvar/addvar 覆盖。
  */
 class StMacroResolver(
     private val variables: MutableMap<String, String> = mutableMapOf(),
     private val globalVariables: MutableMap<String, String> = mutableMapOf(),
     private val random: Random = Random.Default,
     private val now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+    private val lockedVariables: Map<String, String> = emptyMap(),
 ) {
+    init {
+        if (lockedVariables.isNotEmpty()) {
+            variables.putAll(lockedVariables)
+        }
+    }
+
     private val _unresolved = linkedSetOf<String>()
     val unresolvedMacros: Set<String> get() = _unresolved
 
     private val setVarRegex = Regex("""^\s*setvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+    private val addVarRegex = Regex("""^\s*addvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+    private val incVarRegex = Regex("""^\s*incvar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
+    private val decVarRegex = Regex("""^\s*decvar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
     private val getVarRegex = Regex("""^\s*(?:getvar|var)(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
     private val setGlobalVarRegex = Regex("""^\s*setglobalvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+    private val addGlobalVarRegex = Regex("""^\s*addglobalvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+    private val incGlobalVarRegex = Regex("""^\s*incglobalvar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
+    private val decGlobalVarRegex = Regex("""^\s*decglobalvar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
     private val getGlobalVarRegex = Regex("""^\s*(?:getglobalvar|globalvar)(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
     private val hasVarRegex = Regex("""^\s*hasvar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
     private val deleteVarRegex = Regex("""^\s*deletevar(?:::|:)\s*([^}]+)$""", RegexOption.IGNORE_CASE)
     private val randomRegex = Regex("""^\s*(random|pick)(?:::|:)([\s\S]*)$""", RegexOption.IGNORE_CASE)
     private val rollRegex = Regex("""^\s*roll(?:::|:)\s*([\s\S]*)$""", RegexOption.IGNORE_CASE)
     private val diceRegex = Regex("""^\s*(\d*)d(\d+)\s*([+-]\s*\d+)?\s*$""", RegexOption.IGNORE_CASE)
+    private val trimSurroundingRegex = Regex("""(?:\r?\n)*\{\{\s*trim\s*\}\}(?:\r?\n)*""", RegexOption.IGNORE_CASE)
 
     fun render(text: String, context: StMacroContext): String {
         if (text.isEmpty() || !text.contains("{{")) return text
         var result = processConditionals(text, context)
+        if (result.contains("trim", ignoreCase = true)) {
+            result = result.replace(trimSurroundingRegex, "")
+        }
         // 变量值里可能继续引用宏；多轮展开，直到稳定。上限防止自引用死循环。
         repeat(8) {
             val next = replaceOnce(result, context)
@@ -190,17 +210,59 @@ class StMacroResolver(
         if (trimmed.isEmpty()) return ""
         if (trimmed.startsWith("//")) return ""
 
-        setVarRegex.find(trimmed)?.let { match ->
+        setVarRegex.find(expression)?.let { match ->
             val name = match.groupValues[1].trim()
             val value = render(match.groupValues[2], context)
-            variables[name] = value
+            if (!lockedVariables.containsKey(name)) {
+                variables[name] = value
+            }
             return ""
         }
-        setGlobalVarRegex.find(trimmed)?.let { match ->
+        addVarRegex.find(expression)?.let { match ->
+            val name = match.groupValues[1].trim()
+            val value = render(match.groupValues[2], context)
+            if (!lockedVariables.containsKey(name)) {
+                variables[name] = combineVarValue(variables[name].orEmpty(), value)
+            }
+            return ""
+        }
+        incVarRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            if (lockedVariables.containsKey(name)) return variables[name].orEmpty()
+            val next = stepNumericVar(variables[name], 1)
+            variables[name] = next
+            return next
+        }
+        decVarRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            if (lockedVariables.containsKey(name)) return variables[name].orEmpty()
+            val next = stepNumericVar(variables[name], -1)
+            variables[name] = next
+            return next
+        }
+        setGlobalVarRegex.find(expression)?.let { match ->
             val name = match.groupValues[1].trim()
             val value = render(match.groupValues[2], context)
             globalVariables[name] = value
             return ""
+        }
+        addGlobalVarRegex.find(expression)?.let { match ->
+            val name = match.groupValues[1].trim()
+            val value = render(match.groupValues[2], context)
+            globalVariables[name] = combineVarValue(globalVariables[name].orEmpty(), value)
+            return ""
+        }
+        incGlobalVarRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            val next = stepNumericVar(globalVariables[name], 1)
+            globalVariables[name] = next
+            return next
+        }
+        decGlobalVarRegex.find(trimmed)?.let { match ->
+            val name = match.groupValues[1].trim()
+            val next = stepNumericVar(globalVariables[name], -1)
+            globalVariables[name] = next
+            return next
         }
         getVarRegex.find(trimmed)?.let { match ->
             return variables[match.groupValues[1].trim()].orEmpty()
@@ -214,7 +276,9 @@ class StMacroResolver(
         }
         deleteVarRegex.find(trimmed)?.let { match ->
             val name = match.groupValues[1].trim()
-            variables.remove(name)
+            if (!lockedVariables.containsKey(name)) {
+                variables.remove(name)
+            }
             return ""
         }
         randomRegex.find(trimmed)?.let { match ->
@@ -227,28 +291,45 @@ class StMacroResolver(
         }
 
         return when (trimmed.lowercase(Locale.ROOT)) {
-            "char" -> context.characterName
+            "char", "charifnotgroup", "char_if_not_group", "group", "groupnotmuted" -> context.characterName
             "user" -> context.userName
             "persona" -> context.personaDescription
             "description" -> context.description
             "personality" -> context.personality
             "scenario" -> context.scenario
-            "mesexample", "mes_example" -> context.mesExample
+            "mesexample", "mes_example", "mesexamples", "mes_examples" -> context.mesExample
             "model" -> context.modelName
-            "input" -> context.input
+            "input", "lastusermessage", "last_user_message" -> context.lastUserMessage.ifEmpty { context.input }
+            "lastcharmessage", "last_char_message" -> context.lastCharMessage
             "lastmessage", "last_message" -> context.lastMessage
             "original" -> context.original
-            "time", "isotime" -> now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("HH:mm"))
-            "date", "isodate" -> now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+            "time", "isotime", "cur_time" -> now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("HH:mm"))
+            "date", "isodate", "cur_date" -> now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
             "datetime" -> now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
             "weekday" -> now.toJavaLocalDateTime().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
             "newline" -> "\n"
             "space" -> " "
-            "trim" -> ""
-            "cur_date" -> now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-            "cur_time" -> now.toJavaLocalDateTime().format(DateTimeFormatter.ofPattern("HH:mm"))
+            "noop", "trim" -> ""
             else -> null
         }
+    }
+
+    private fun combineVarValue(current: String, addition: String): String {
+        val cTrim = current.trim()
+        val aTrim = addition.trim()
+        if (cTrim.isNotEmpty() && aTrim.isNotEmpty()) {
+            val cNum = cTrim.toBigDecimalOrNull()
+            val aNum = aTrim.toBigDecimalOrNull()
+            if (cNum != null && aNum != null) {
+                return (cNum + aNum).stripTrailingZeros().toPlainString()
+            }
+        }
+        return current + addition
+    }
+
+    private fun stepNumericVar(current: String?, delta: Long): String {
+        val num = current?.trim()?.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO
+        return (num + java.math.BigDecimal.valueOf(delta)).stripTrailingZeros().toPlainString()
     }
 
     private fun splitRandomOptions(raw: String): List<String> {
@@ -270,9 +351,38 @@ class StMacroResolver(
 
     companion object {
         private val setVarDeclarationRegex = Regex("""^\s*setvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+        private val addVarDeclarationRegex = Regex("""^\s*addvar(?:::|:)([^:=]+)(?:::|:|=)([\s\S]*)$""", RegexOption.IGNORE_CASE)
+
+        private enum class VarOpType { SET, ADD }
+        private data class VarMutation(val type: VarOpType, val key: String, val rawValue: String)
 
         /**
-         * Pass 1: 扫描所有启用的条目，提前提取 setvar 默认值并展开拓扑依赖
+         * 基于完整预设的启用顺序（prompt_order）扫描变量默认值并展开依赖。
+         */
+        fun preScanVariables(
+            preset: StPreset,
+            persistedVariables: Map<String, String> = emptyMap(),
+            context: StMacroContext = StMacroContext(),
+            random: Random = Random.Default,
+            now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+        ): MutableMap<String, String> {
+            val enabledOrderedPrompts = StPromptAssembler.orderedPrompts(preset)
+                .filter { (_, entry) -> entry.enabled }
+                .map { (prompt, _) -> prompt }
+            return preScanVariables(
+                prompts = enabledOrderedPrompts,
+                persistedVariables = persistedVariables,
+                context = context,
+                random = random,
+                now = now,
+            )
+        }
+
+        /**
+         * Pass 1: 按条目顺序扫描所有 setvar / addvar 声明并展开拓扑依赖。
+         * - 预设内后续启用的 setvar 会覆盖前面的初始化空值（如 #2 变量初始化 -> #27 梦白话文风）；
+         * - addvar 会在当前变量值基础上追加内容；
+         * - [persistedVariables] 中的用户显式自定义值具有最高优先级，不会被预设默认声明覆盖。
          */
         fun preScanVariables(
             prompts: List<StPrompt>,
@@ -281,22 +391,32 @@ class StMacroResolver(
             random: Random = Random.Default,
             now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
         ): MutableMap<String, String> {
-            val vars = persistedVariables.toMutableMap()
+            val vars = linkedMapOf<String, String>()
 
-            // 1. 抽取所有条目里的静态声明
+            // 1. 按条目顺序执行 setvar / addvar 静态声明
             prompts.forEach { prompt ->
-                if (prompt.content.contains("setvar", ignoreCase = true)) {
-                    extractSetVars(prompt.content).forEach { (key, rawVal) ->
-                        // 会话已存的用户自定义变量优先；不存在才采用预设默认值
-                        if (!vars.containsKey(key)) {
-                            vars[key] = rawVal
+                if (prompt.content.contains("setvar", ignoreCase = true) ||
+                    prompt.content.contains("addvar", ignoreCase = true)
+                ) {
+                    extractVarMutations(prompt.content).forEach { mutation ->
+                        when (mutation.type) {
+                            VarOpType.SET -> vars[mutation.key] = mutation.rawValue
+                            VarOpType.ADD -> vars[mutation.key] = vars[mutation.key].orEmpty() + mutation.rawValue
                         }
                     }
                 }
             }
 
-            // 2. 拓扑迭代展开（处理 {{setvar::A::{{getvar::B}}}} 这种嵌套依赖，最多 6 轮防死循环）
-            val resolver = StMacroResolver(variables = vars, random = random, now = now)
+            // 2. 用户自定义变量覆盖默认值
+            vars.putAll(persistedVariables)
+
+            // 3. 拓扑迭代展开（处理 {{setvar::A::{{getvar::B}}}} 这种嵌套依赖，最多 6 轮防死循环）
+            val resolver = StMacroResolver(
+                variables = vars,
+                random = random,
+                now = now,
+                lockedVariables = persistedVariables,
+            )
             repeat(6) {
                 var changed = false
                 vars.keys.toList().forEach { k ->
@@ -312,20 +432,66 @@ class StMacroResolver(
             return vars
         }
 
-        private fun extractSetVars(text: String): List<Pair<String, String>> {
-            val result = mutableListOf<Pair<String, String>>()
+        /**
+         * 判断一段提示词是否仅包含变量赋值（setvar/addvar/incvar/decvar/deletevar）、注释（//）或 trim，
+         * 即自身不会产生任何发给模型的可见文本，仅用于修改宏变量状态。
+         */
+        fun isVariableMutationOnly(content: String): Boolean {
+            if (content.isBlank()) return false
+            val resolver = StMacroResolver()
+            val stripped = resolver.render(content, StMacroContext())
+            if (stripped.isNotBlank()) return false
+            return content.contains("setvar", ignoreCase = true) ||
+                content.contains("addvar", ignoreCase = true) ||
+                content.contains("incvar", ignoreCase = true) ||
+                content.contains("decvar", ignoreCase = true) ||
+                content.contains("setglobalvar", ignoreCase = true) ||
+                content.contains("addglobalvar", ignoreCase = true)
+        }
+
+        fun findAdditiveVariableNames(prompts: List<StPrompt>): Set<String> {
+            val names = mutableSetOf<String>()
+            prompts.forEach { prompt ->
+                if (!prompt.content.contains("{{")) return@forEach
+                extractVarMutations(prompt.content).forEach { mutation ->
+                    if (mutation.type == VarOpType.ADD && mutation.key.isNotEmpty()) {
+                        names += mutation.key
+                    }
+                }
+            }
+            return names
+        }
+
+        fun findMutatedVariableNames(prompts: List<StPrompt>): Set<String> {
+            val names = mutableSetOf<String>()
+            prompts.forEach { prompt ->
+                if (!prompt.content.contains("{{")) return@forEach
+                extractVarMutations(prompt.content).forEach { mutation ->
+                    if (mutation.key.isNotEmpty()) {
+                        names += mutation.key
+                    }
+                }
+            }
+            return names
+        }
+
+        private fun extractVarMutations(text: String): List<VarMutation> {
+            val result = mutableListOf<VarMutation>()
             var cursor = 0
             while (cursor < text.length) {
                 val start = text.indexOf("{{", cursor)
                 if (start < 0) break
                 val end = findMacroEndStatic(text, start)
                 if (end < 0) break
-                val expression = text.substring(start + 2, end).trim()
-                val match = setVarDeclarationRegex.find(expression)
-                if (match != null) {
+                val expression = text.substring(start + 2, end)
+                setVarDeclarationRegex.find(expression)?.let { match ->
                     val key = match.groupValues[1].trim()
-                    val rawVal = match.groupValues[2].trim()
-                    result.add(key to rawVal)
+                    val rawVal = match.groupValues[2]
+                    result.add(VarMutation(VarOpType.SET, key, rawVal))
+                } ?: addVarDeclarationRegex.find(expression)?.let { match ->
+                    val key = match.groupValues[1].trim()
+                    val rawVal = match.groupValues[2]
+                    result.add(VarMutation(VarOpType.ADD, key, rawVal))
                 }
                 cursor = end + 2
             }

@@ -34,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -82,6 +83,10 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
+import me.rerere.rikkahub.data.repository.StPresetRepository
+import me.rerere.rikkahub.data.stpreset.StPreset
+import me.rerere.rikkahub.data.stpreset.StRegexPipeline
+import org.koin.compose.koinInject
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
@@ -410,6 +415,31 @@ private fun MessagePartsBlock(
                     is UIMessagePart.Text -> {
                         // 只有正在生成的最后一段文字可能停在没写完的语法上
                         val streamingText = loading && block.index == parts.lastIndex
+                        val stPresetRepository: StPresetRepository = koinInject()
+                        val activeStPreset by produceState<StPreset?>(initialValue = null, assistant?.stPresetId) {
+                            value = assistant?.stPresetId?.let { presetId ->
+                                runCatching { stPresetRepository.getRecord(presetId) }.getOrNull()
+                                    ?.takeIf { it.enabled }
+                                    ?.preset
+                            }
+                        }
+                        val displayContent = remember(part.text, assistant, activeStPreset, role) {
+                            val scope = if (role == MessageRole.USER) AssistantAffectScope.USER else AssistantAffectScope.ASSISTANT
+                            val afterAssistantRegex = part.text.replaceRegexes(
+                                assistant = assistant,
+                                scope = scope,
+                                visual = true,
+                            )
+                            if (activeStPreset != null || afterAssistantRegex.contains("<dream_", ignoreCase = true)) {
+                                StRegexPipeline.applyToDisplayText(
+                                    text = afterAssistantRegex,
+                                    scripts = activeStPreset?.regexScripts.orEmpty(),
+                                    placement = if (role == MessageRole.USER) 1 else 2,
+                                )
+                            } else {
+                                afterAssistantRegex
+                            }
+                        }
                         val textContent = @Composable {
                             if (role == MessageRole.USER) {
                                 ChatMessageBubble(
@@ -422,11 +452,7 @@ private fun MessagePartsBlock(
                                         .animateContentSize(),
                                 ) {
                                     MarkdownBlock(
-                                        content = part.text.replaceRegexes(
-                                            assistant = assistant,
-                                            scope = AssistantAffectScope.USER,
-                                            visual = true,
-                                        ),
+                                        content = displayContent,
                                         onClickCitation = handleClickCitation
                                     )
                                 }
@@ -438,22 +464,14 @@ private fun MessagePartsBlock(
                                         modifier = Modifier.animateContentSize(),
                                     ) {
                                         MarkdownBlock(
-                                            content = part.text.replaceRegexes(
-                                                assistant = assistant,
-                                                scope = AssistantAffectScope.ASSISTANT,
-                                                visual = true,
-                                            ),
+                                            content = displayContent,
                                             streaming = streamingText,
                                             onClickCitation = handleClickCitation,
                                         )
                                     }
                                 } else {
                                     MarkdownBlock(
-                                        content = part.text.replaceRegexes(
-                                            assistant = assistant,
-                                            scope = AssistantAffectScope.ASSISTANT,
-                                            visual = true,
-                                        ),
+                                        content = displayContent,
                                         streaming = streamingText,
                                         onClickCitation = handleClickCitation,
                                         modifier = Modifier

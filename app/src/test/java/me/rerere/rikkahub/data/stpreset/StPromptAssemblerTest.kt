@@ -557,4 +557,131 @@ class StPromptAssemblerTest {
         assertEquals("World Info (before)", rows[1].prompt.name)
         assertEquals("World Info (after)", rows[4].prompt.name)
     }
+
+    @Test
+    fun `autoOptimizeOrder splits mixed static-dynamic prompt and preserves history tags and assistant prefill`() {
+        val preset = preset(
+            prompts = listOf(
+                p("varInit", "{{setvar::wenfeng::}}{{setvar::zishu::1500字}}"),
+                p("main", "MAIN_SYS"),
+                p("openHist", "<dream_history>"),
+                p("chatHistory", marker = true),
+                p("closeHist", "</dream_history>"),
+                p("switch1", "{{addvar::wenfeng::DeepWaterStyle }}"),
+                p("switch2", "{{addvar::wenfeng::ThirdPerson}}"),
+                p(
+                    "writingMode",
+                    "【最新输入】\n<dreamer_input>\n{{lastUserMessage}}\n</dreamer_input>\n\n# 写作设置\n<writing_setting>\n{{getvar::wenfeng}}\n</writing_setting>\n字数：{{getvar::zishu}}",
+                    role = MessageRole.USER,
+                ),
+                p("prefill1", "【系统确认】", role = MessageRole.ASSISTANT),
+                p("prefill2", "<dream_think>", role = MessageRole.ASSISTANT),
+            ),
+            order = listOf(
+                StPromptOrderEntry("varInit", true),
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("openHist", true),
+                StPromptOrderEntry("chatHistory", true),
+                StPromptOrderEntry("closeHist", true),
+                StPromptOrderEntry("switch1", true),
+                StPromptOrderEntry("switch2", true),
+                StPromptOrderEntry("writingMode", true),
+                StPromptOrderEntry("prefill1", true),
+                StPromptOrderEntry("prefill2", true),
+            ),
+        )
+
+        val rows = StPromptAssembler.editablePrompts(preset)
+        val zoneById = rows.associate { it.prompt.identifier to it.zone }
+        assertEquals(StPromptZone.VARIABLE_ONLY, zoneById["varInit"])
+        assertEquals(StPromptZone.ZONE_A, zoneById["main"])
+        assertEquals(StPromptZone.ZONE_A, zoneById["openHist"])
+        assertEquals(StPromptZone.ZONE_B, zoneById["chatHistory"])
+        assertEquals(StPromptZone.ZONE_C, zoneById["closeHist"])
+        assertEquals(StPromptZone.VARIABLE_ONLY, zoneById["switch1"])
+        assertEquals(StPromptZone.ZONE_A_AND_C, zoneById["writingMode"])
+        assertEquals(StPromptZone.ZONE_C, zoneById["prefill1"])
+        assertEquals(StPromptZone.ZONE_C, zoneById["prefill2"])
+
+        val history = listOf(
+            UIMessage.user("Turn 1 User"),
+            UIMessage.assistant("Turn 1 Reply"),
+            UIMessage.user("Latest User Input!"),
+        )
+        val result = StPromptAssembler.assemble(preset = preset, history = history)
+
+        // Zone A: MAIN_SYS, static part of writingMode (with accumulated addvar!), and <dream_history> right at the end of Zone A
+        assertEquals(3, result.zoneAMessages.size)
+        assertEquals("MAIN_SYS", result.zoneAMessages[0].toText())
+        assertTrue(result.zoneAMessages[1].toText().contains("DeepWaterStyle ThirdPerson"))
+        assertTrue(result.zoneAMessages[1].toText().contains("字数：1500字"))
+        assertTrue(!result.zoneAMessages[1].toText().contains("Latest User Input!"))
+        assertEquals("<dream_history>", result.zoneAMessages[2].toText())
+
+        // Zone B: Chat History
+        assertEquals(listOf("Turn 1 User", "Turn 1 Reply", "Latest User Input!"), result.zoneBMessages.map { it.toText() })
+
+        // Zone C: </dream_history>, dynamic <dreamer_input> part of writingMode, and assistant prefills at the very end
+        assertEquals("</dream_history>", result.zoneCMessages[0].toText())
+        assertTrue(result.zoneCMessages[1].toText().contains("<dreamer_input>\nLatest User Input!\n</dreamer_input>"))
+        assertEquals("【系统确认】", result.zoneCMessages[2].toText())
+        assertEquals("<dream_think>", result.zoneCMessages[3].toText())
+        assertEquals(MessageRole.ASSISTANT, result.messages.last().role)
+    }
+
+    @Test
+    fun `dream whale V5 benchmark preset parses and assembles with full macro and zone support`() {
+        val file = listOf(
+            java.io.File("../示例预设-梦鲸思客V5.json"),
+            java.io.File("../../示例预设-梦鲸思客V5.json"),
+            java.io.File("f:/Project/示例预设-梦鲸思客V5.json"),
+        ).firstOrNull { it.exists() } ?: return
+        val parsed = StPresetParser.parse(file.readText(Charsets.UTF_8), fallbackName = "梦鲸思客V5")
+        val preset = parsed.preset
+
+        // Verify preScanVariables evaluates sequential setvar + addvar across enabled prompts
+        val scannedVars = StMacroResolver.preScanVariables(preset)
+        assertTrue("sleep_var_wenfeng should be accumulated via addvar", scannedVars["sleep_var_wenfeng"].orEmpty().isNotBlank())
+        assertEquals("输出内容约 1000 到 2000 字。", scannedVars["sleep_var_zishu"])
+
+        val history = listOf(
+            UIMessage.user("你好，带我进入星海梦境。"),
+            UIMessage.assistant("星海的帷幕向你敞开。"),
+            UIMessage.user("我走向灯塔。"),
+        )
+        val variables = mutableMapOf<String, String>()
+        val result1 = StPromptAssembler.assemble(
+            preset = preset,
+            history = history,
+            character = CharacterCard(name = "守塔人", description = "古老灯塔的看守者"),
+            personaName = "旅人",
+            variables = variables,
+            userLockedVariables = emptyMap(),
+        )
+        // Run a second turn with the same variables map to verify addvar does NOT duplicate across turns
+        val result2 = StPromptAssembler.assemble(
+            preset = preset,
+            history = history,
+            character = CharacterCard(name = "守塔人", description = "古老灯塔的看守者"),
+            personaName = "旅人",
+            variables = variables,
+            userLockedVariables = emptyMap(),
+        )
+        assertEquals(
+            "Zone A static prefix must be 100% identical across turns without addvar duplication",
+            result1.zoneAMessages.map { it.toText() },
+            result2.zoneAMessages.map { it.toText() },
+        )
+        assertEquals("<dream_history>", result1.zoneAMessages.last().toText().trim())
+        assertEquals("</dream_history>", result1.zoneCMessages.first().toText().trim())
+        assertTrue(
+            "Zone C should contain expanded {{lastUserMessage}}",
+            result1.zoneCMessages.any { it.toText().contains("我走向灯塔。") },
+        )
+        val secondToLast = result1.messages[result1.messages.size - 2]
+        assertEquals(MessageRole.ASSISTANT, secondToLast.role)
+        assertTrue(secondToLast.toText().contains("</dream_think>"))
+        assertEquals(MessageRole.USER, result1.messages.last().role)
+        assertEquals("思客，开始输出吧。", result1.messages.last().toText())
+    }
 }

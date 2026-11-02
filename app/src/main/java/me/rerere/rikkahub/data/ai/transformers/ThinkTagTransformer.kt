@@ -8,7 +8,8 @@ import me.rerere.ai.ui.UIMessagePart
 import kotlin.time.Clock
 import kotlin.time.Instant
 
-private val THINKING_REGEX = Regex("\\A\\s*<think>([\\s\\S]*?)(</think>|$)")
+private val THINKING_REGEX = Regex("\\A\\s*<(think|dream_think)>([\\s\\S]*?)(</\\1>|$)", RegexOption.IGNORE_CASE)
+private val PREFILLED_DREAM_THINK_REGEX = Regex("\\A\\s*([\\s\\S]*?)(</dream_think>)\\s*", RegexOption.IGNORE_CASE)
 
 // 部分供应商不会返回reasoning parts, 所以需要这个transformer
 object ThinkTagTransformer : OutputMessageTransformer {
@@ -61,14 +62,17 @@ internal fun List<UIMessage>.transformThinkTags(
     }
     val textPart = message.parts.getOrNull(textPartIndex) as? UIMessagePart.Text
         ?: return@map message
-    val match = THINKING_REGEX.find(textPart.text) ?: return@map message
-    val hasClosingTag = match.groups[2]?.value == "</think>"
+    val openMatch = THINKING_REGEX.find(textPart.text)
+    val prefillMatch = if (openMatch == null) PREFILLED_DREAM_THINK_REGEX.find(textPart.text) else null
+    val match = openMatch ?: prefillMatch ?: return@map message
+    val reasoningText = if (openMatch != null) openMatch.groupValues[2].trim() else prefillMatch!!.groupValues[1].trim()
+    val hasClosingTag = if (openMatch != null) openMatch.groupValues[3].isNotEmpty() else true
     val reasoning = UIMessagePart.Reasoning(
-        reasoning = match.groupValues[1].trim(),
+        reasoning = reasoningText,
         createdAt = message.createdAt.toInstant(timeZone = TimeZone.currentSystemDefault()),
         finishedAt = if (generationFinished || hasClosingTag) now else null,
     )
-    val strippedText = textPart.copy(text = textPart.text.removeRange(match.range))
+    val strippedText = textPart.copy(text = textPart.text.removeRange(match.range).trimStart('\n', '\r'))
 
     message.copy(
         parts = buildList {

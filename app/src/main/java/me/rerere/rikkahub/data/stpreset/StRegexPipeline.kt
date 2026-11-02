@@ -83,7 +83,8 @@ object StRegexPipeline {
     ): String {
         if (text.isEmpty()) return text
         val warnings = mutableListOf<String>()
-        return scripts.fold(text) { acc, script ->
+        val preFormatted = formatDreamBlocksForDisplay(text)
+        val afterScripts = scripts.fold(preFormatted) { acc, script ->
             if (script.disabled || !script.isDisplayScript) return@fold acc
             if (placement !in script.placement && script.placement.isNotEmpty()) return@fold acc
             if (!inDepth(script, depth)) return@fold acc
@@ -93,6 +94,218 @@ object StRegexPipeline {
                 regex.replace(acc) { match -> expandReplacement(match, replacement) }
                     .let { value -> script.trimStrings.fold(value) { current, trim -> current.replace(trim, "") } }
             }.getOrDefault(acc)
+        }
+        return normalizeHtmlDetailsForMarkdown(afterScripts)
+    }
+
+    private val DREAM_SELF_CHECK_REGEX = Regex(
+        """<dream_self_check\b[^>]*>\s*([\s\S]*?)\s*</dream_self_check>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val REVIEW_TAG_REGEX = Regex("""<review\b[^>]*>([\s\S]*?)</review>""", RegexOption.IGNORE_CASE)
+    private val PATCH_TAG_REGEX = Regex("""<patch\b[^>]*>([\s\S]*?)</patch>""", RegexOption.IGNORE_CASE)
+    private val PATCH_PAIR_REGEX = Regex("""^FIND:[ \t]*([\s\S]*?)\nREPLACE:[ \t]?([\s\S]*)$""")
+    private val PATCH_SPLIT_REGEX = Regex("""\n[ \t]*\n(?=FIND:[ \t]*)""")
+
+    private val DREAM_SCENE_XML_REGEX = Regex(
+        """<dream_scene>\s*<date>\s*([\s\S]*?)\s*</date>\s*<time>\s*([\s\S]*?)\s*</time>\s*<location>\s*([\s\S]*?)\s*</location>\s*</dream_scene>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val DREAM_SCENE_GENERIC_REGEX = Regex(
+        """<dream_scene>\s*([\s\S]*?)\s*</dream_scene>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val DREAM_OPTION_REGEX = Regex(
+        """<dream_option\b[^>]*>\s*([\s\S]*?)\s*</dream_option>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val DREAM_PARALLEL_EVENT_REGEX = Regex(
+        """<dream_parallel_event>\s*([\s\S]*?)\s*</dream_parallel_event>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val SIMPLE_THINKING_REGEX = Regex(
+        """<simple_thinking>\s*([\s\S]*?)\s*</simple_thinking>\s*""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val DREAM_BIG_DISCUSS_REGEX = Regex(
+        """<dream_big_discuss>\s*([\s\S]*?)\s*</dream_big_discuss>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val QUESTION_NODE_REGEX = Regex(
+        """<q\b[^>]*content\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)</q>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val ANSWER_NODE_REGEX = Regex(
+        """<([a-z])\b[^>]*>([\s\S]*?)</\1>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val STYLED_DETAILS_REGEX = Regex(
+        """<details\b[^>]*>\s*<summary\b[^>]*>([\s\S]*?)</summary>\s*(?:<div\b[^>]*>([\s\S]*?)</div>|<pre\b[^>]*>([\s\S]*?)</pre>|([\s\S]*?))\s*</details>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val FALLBACK_SUMMARY_REGEX = Regex(
+        """<dream_summary>\s*([\s\S]*?)\s*</dream_summary>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val FALLBACK_DISCUSS_REGEX = Regex(
+        """<dream_discuss>\s*([\s\S]*?)\s*</dream_discuss>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val FALLBACK_WRAPPER_TAGS_REGEX = Regex(
+        """(?:</?dream_plot>|</?dream_body>|</?dream_after_format>|<dream_done\s*/>|<dream_check_done\s*/>)\r?\n?""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val INLINE_HTML_TAG_REGEX = Regex("""</?(?:span|strong|em|b|i)\b[^>]*>""", RegexOption.IGNORE_CASE)
+
+    /**
+     * 将 SillyTavern 预设（如梦鲸思客 V5）中依赖浏览器 iframe / DOM 脚本的 XML 块
+     * 转换为 RikkaHub 原生 BetterMarkdown 可渲染的引用卡片与 `<details>` 折叠面板。
+     */
+    internal fun formatDreamBlocksForDisplay(input: String): String {
+        var result = input
+
+        // 1. <dream_self_check>：自动将 <patch> 中的 FIND/REPLACE 应用于前文，并渲染折叠自检报告
+        if (result.contains("<dream_self_check", ignoreCase = true)) {
+            val checkMatches = DREAM_SELF_CHECK_REGEX.findAll(result).toList()
+            for (match in checkMatches.asReversed()) {
+                val inner = match.groupValues[1]
+                val review = REVIEW_TAG_REGEX.find(inner)?.groupValues?.get(1)?.trim().orEmpty()
+                val patchRaw = PATCH_TAG_REGEX.find(inner)?.groupValues?.get(1)?.trim().orEmpty()
+                val patches = if (patchRaw.isNotEmpty()) {
+                    patchRaw.replace("\r\n", "\n")
+                        .split(PATCH_SPLIT_REGEX)
+                        .mapNotNull { block ->
+                            val m = PATCH_PAIR_REGEX.find(block.trim()) ?: return@mapNotNull null
+                            m.groupValues[1] to m.groupValues[2]
+                        }
+                } else {
+                    emptyList()
+                }
+                var beforeText = result.substring(0, match.range.first)
+                val afterText = result.substring(match.range.last + 1)
+                var appliedCount = 0
+                for ((findStr, replaceStr) in patches) {
+                    if (findStr.isNotEmpty() && beforeText.contains(findStr)) {
+                        beforeText = beforeText.replaceFirst(findStr, replaceStr)
+                        appliedCount++
+                    }
+                }
+                val title = if (patches.isNotEmpty()) {
+                    "🔍 梦境自检与修复（已应用 $appliedCount/${patches.size} 项修正）"
+                } else {
+                    "🔍 梦境自检（本轮无纰漏）"
+                }
+                val cardBody = buildString {
+                    if (review.isNotEmpty()) {
+                        append(review)
+                    }
+                    if (patches.isNotEmpty()) {
+                        if (isNotEmpty()) append("\n\n")
+                        patches.forEachIndexed { idx, (f, r) ->
+                            val rDisplay = r.ifEmpty { "∅（删除）" }
+                            append("${idx + 1}. `$f` → `$rDisplay`")
+                            if (idx < patches.lastIndex) append('\n')
+                        }
+                    }
+                }.ifBlank { "已完成正文自检。" }
+                val card = "\n<details>\n<summary>$title</summary>\n\n$cardBody\n\n</details>\n"
+                result = beforeText + card + afterText
+            }
+        }
+
+        // 2. <dream_scene>：转换为紧凑引用状态栏
+        result = DREAM_SCENE_XML_REGEX.replace(result) { match ->
+            val date = match.groupValues[1].trim()
+            val time = match.groupValues[2].trim()
+            val location = match.groupValues[3].trim()
+            "> 📅 **$date** ｜ 🕰️ **$time** ｜ 📍 **$location**\n"
+        }
+        result = DREAM_SCENE_GENERIC_REGEX.replace(result) { match ->
+            val lines = match.groupValues[1].lines().map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.isEmpty()) "" else "> ${lines.joinToString(" ｜ ")}\n"
+        }
+
+        // 3. <dream_parallel_event>：清理 <simple_thinking> 并渲染平行事件折叠卡片
+        result = DREAM_PARALLEL_EVENT_REGEX.replace(result) { match ->
+            val cleaned = SIMPLE_THINKING_REGEX.replace(match.groupValues[1], "").trim()
+            val events = cleaned.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val formattedEvents = events.joinToString("\n\n") { line ->
+                val sep = line.indexOf('|')
+                if (sep > 0) {
+                    val loc = line.substring(0, sep).trim()
+                    val desc = line.substring(sep + 1).trim().replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n  ")
+                    "- **【$loc】**\n  $desc"
+                } else {
+                    "- ${line.replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n  ")}"
+                }
+            }.ifBlank { "暂无平行事件" }
+            "\n<details>\n<summary>🪐 梦境平行事件（${events.size} 处）</summary>\n\n$formattedEvents\n\n</details>\n"
+        }
+
+        // 4. <dream_big_discuss>：解析共创讨论与 <q content="..."><a>...</a></q>
+        result = DREAM_BIG_DISCUSS_REGEX.replace(result) { match ->
+            val raw = match.groupValues[1]
+            val questions = QUESTION_NODE_REGEX.findAll(raw).toList()
+            val discussNote = QUESTION_NODE_REGEX.replace(raw, "").trim()
+            val body = buildString {
+                if (discussNote.isNotEmpty()) {
+                    append(discussNote)
+                }
+                questions.forEachIndexed { qIdx, qMatch ->
+                    if (isNotEmpty()) append("\n\n")
+                    val qTitle = qMatch.groupValues[1].trim()
+                    append("**Q${qIdx + 1}：$qTitle**")
+                    val answers = ANSWER_NODE_REGEX.findAll(qMatch.groupValues[2]).toList()
+                    answers.forEachIndexed { aIdx, aMatch ->
+                        append("\n${aIdx + 1}. ${aMatch.groupValues[2].trim()}")
+                    }
+                }
+            }.ifBlank { raw.trim() }
+            val meta = if (questions.isNotEmpty()) "（${questions.size} 问）" else ""
+            "\n<details open>\n<summary>💬 思客大调查$meta</summary>\n\n$body\n\n</details>\n"
+        }
+
+        // 5. <dream_option>：支持 `|` 分隔或换行分隔的行动选项
+        result = DREAM_OPTION_REGEX.replace(result) { match ->
+            val raw = match.groupValues[1].trim()
+            val options = if (raw.contains('|')) {
+                raw.split('|').map { it.trim() }.filter { it.isNotEmpty() }
+            } else {
+                raw.lines().map { it.trim().removePrefix("- ").replace(Regex("""^\d+[.、]\s*"""), "") }.filter { it.isNotEmpty() }
+            }
+            if (options.isEmpty()) return@replace ""
+            val listText = options.mapIndexed { idx, opt -> "${idx + 1}. $opt" }.joinToString("\n")
+            "\n<details open>\n<summary>🎯 剧情推进选项（${options.size} 项）</summary>\n\n$listText\n\n</details>\n"
+        }
+
+        return result
+    }
+
+    /**
+     * 将带 inline style / `<div>` 包裹的 HTML `<details>` 规范化为 BetterMarkdown 原生支持的格式。
+     */
+    internal fun normalizeHtmlDetailsForMarkdown(input: String): String {
+        var result = input
+        if (result.contains("<dream_summary>", ignoreCase = true)) {
+            result = FALLBACK_SUMMARY_REGEX.replace(result) { match ->
+                "\n<details>\n<summary>🐋梦鲸摘要</summary>\n\n${match.groupValues[1].trim()}\n\n</details>\n"
+            }
+        }
+        if (result.contains("<dream_discuss>", ignoreCase = true)) {
+            result = FALLBACK_DISCUSS_REGEX.replace(result) { match ->
+                "\n<details>\n<summary>📖思客说书</summary>\n\n${match.groupValues[1].trim()}\n\n</details>\n"
+            }
+        }
+        result = FALLBACK_WRAPPER_TAGS_REGEX.replace(result, "")
+        if (!result.contains("<details", ignoreCase = true)) return result
+        return STYLED_DETAILS_REGEX.replace(result) { match ->
+            val rawTag = match.value
+            val isOpen = Regex("""^<details\b[^>]*\bopen\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawTag)
+            val summaryTitle = INLINE_HTML_TAG_REGEX.replace(match.groupValues[1], "").trim().lines().firstOrNull()?.trim().orEmpty()
+                .ifBlank { "详情" }
+            val body = (match.groupValues[2].ifEmpty { match.groupValues[3] }.ifEmpty { match.groupValues[4] }).trim()
+            val openAttr = if (isOpen) " open" else ""
+            "\n<details$openAttr>\n<summary>$summaryTitle</summary>\n\n$body\n\n</details>\n"
         }
     }
 

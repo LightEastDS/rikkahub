@@ -118,4 +118,28 @@ class StMacroResolverTest {
         val rendered = resolver.render(prompts[0].content, context)
         assertEquals("Role is Hero", rendered)
     }
+
+    @Test
+    fun `addvar incvar decvar and lastUserMessage work properly`() {
+        val variables = mutableMapOf<String, String>()
+        val resolver = StMacroResolver(variables)
+        val ctx = context.copy(
+            lastUserMessage = "User latest action",
+            lastCharMessage = "Character previous reply",
+        )
+        val rendered = resolver.render(
+            "{{setvar::wenfeng::Base}}{{addvar::wenfeng:: + DeepWater}}{{incvar::count}}{{incvar::count}}{{decvar::count}}" +
+                "[{{getvar::wenfeng}}|{{getvar::count}}|{{lastUserMessage}}|{{lastCharMessage}}|{{charIfNotGroup}}]",
+            ctx,
+        )
+        assertEquals("121[Base + DeepWater|1|User latest action|Character previous reply|Alice]", rendered)
+    }
+
+    @Test
+    fun `trim macro strips surrounding newlines and isVariableMutationOnly detects pure switch prompts`() {
+        val resolver = StMacroResolver()
+        assertEquals("Line1Line2", resolver.render("Line1\n\n{{trim}}\n\nLine2", context))
+        assertTrue(StMacroResolver.isVariableMutationOnly("{{// comment}}\n{{setvar::a::1}}\n{{addvar::b::2}}\n{{trim}}"))
+        assertTrue(!StMacroResolver.isVariableMutationOnly("{{setvar::a::1}}Visible Text"))
+    }
 }

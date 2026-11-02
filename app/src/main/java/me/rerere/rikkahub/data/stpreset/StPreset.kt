@@ -64,11 +64,28 @@ data class StPromptOrderEntry(
     val enabled: Boolean = true,
 )
 
+/** 预设条目在三区动静分离组装架构中的归属分区。 */
+enum class StPromptZone {
+    /** 静态前缀区（对话历史之前，100% 命中前缀缓存） */
+    ZONE_A,
+    /** 稳定历史区（chatHistory 及其紧邻包裹标签） */
+    ZONE_B,
+    /** 动态后缀区（动态宏、In-Chat 注入、尾部预填充等，位于历史之后） */
+    ZONE_C,
+    /** 动静混合自动切分（静态主体进入 Zone A 命中缓存，动态输入块进入 Zone C） */
+    ZONE_A_AND_C,
+    /** 仅变量赋值或注释（只修改 setvar/addvar，自身不生成任何消息） */
+    VARIABLE_ONLY,
+    /** 空内容或未挂载 */
+    NONE,
+}
+
 /** 预设详情页的一行：在 prompt_order 里的条目带 [orderIndex]，未挂载的为 null。 */
 data class StPromptRow(
     val prompt: StPrompt,
     val orderIndex: Int?,
     val enabled: Boolean,
+    val zone: StPromptZone = StPromptZone.NONE,
 )
 
 /** 结构性 marker：不允许在 UI 里停用，保证上下文/世界书永远有插入点。 */
@@ -126,7 +143,9 @@ data class StRegexScript(
     val maxDepth: Int? = null,
 ) {
     val isPromptScript: Boolean get() = promptOnly || !markdownOnly
-    val isDisplayScript: Boolean get() = markdownOnly
+    /** 非仅限提示词的脚本（包括 markdownOnly 以及未限定作用域的通用脚本）均在显示层生效 */
+    val isDisplayScript: Boolean get() = !promptOnly
+    val isMarkdownOnlyScript: Boolean get() = markdownOnly && !promptOnly
 }
 
 /** Character Book / 角色卡内嵌世界书的精简模型。 */

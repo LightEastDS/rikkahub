@@ -17,6 +17,9 @@ import kotlin.time.Clock
 data class StAssemblyResult(
     val messages: List<UIMessage>,
     val report: StAssemblyReport,
+    val zoneAMessages: List<UIMessage> = emptyList(),
+    val zoneBMessages: List<UIMessage> = emptyList(),
+    val zoneCMessages: List<UIMessage> = emptyList(),
 )
 
 data class StAssemblyRequest(
@@ -34,6 +37,7 @@ data class StAssemblyRequest(
     val milestoneMessageIds: Set<String> = emptySet(),
     val historyAlreadyTrimmed: Boolean = false,
     val variables: MutableMap<String, String> = mutableMapOf(),
+    val userLockedVariables: Map<String, String>? = null,
     val globalVariables: MutableMap<String, String> = mutableMapOf(),
     val random: Random = Random.Default,
     val now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
@@ -60,7 +64,22 @@ object StPromptAssembler {
     )
 
     private val DYNAMIC_MACRO_REGEX = Regex(
-        """\{\{\s*(time|cur_time|datetime|cur_date|date|isotime|isodate|weekday|input|lastmessage|last_message|lastmessageid|last_message_id|chat_id|message_id|idle_duration|random|pick|roll)\b""",
+        """\{\{\s*(time|cur_time|datetime|cur_date|date|isotime|isodate|weekday|input|lastmessage|last_message|lastusermessage|last_user_message|lastcharmessage|last_char_message|lastmessageid|last_message_id|chat_id|message_id|idle_duration|random|pick|roll|incvar|decvar|incglobalvar|decglobalvar)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val DYNAMIC_INPUT_BLOCK_REGEX = Regex(
+        """(?:^|\r?\n)(?:【[^】\r\n]+】\s*\r?\n)?<([a-zA-Z0-9_]*(?:input|instruction)[a-zA-Z0-9_]*)>[\s\S]*?</\1>""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val HISTORY_OPEN_TAG_REGEX = Regex(
+        """^\s*<([a-zA-Z0-9_]*history[a-zA-Z0-9_]*)>\s*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val HISTORY_CLOSE_TAG_REGEX = Regex(
+        """^\s*</([a-zA-Z0-9_]*history[a-zA-Z0-9_]*)>\s*$""",
         RegexOption.IGNORE_CASE
     )
 
@@ -68,19 +87,74 @@ object StPromptAssembler {
         return content.contains(DYNAMIC_MACRO_REGEX)
     }
 
+    fun isHistoryOpenTag(content: String): Boolean = HISTORY_OPEN_TAG_REGEX.matches(content)
+
+    fun isHistoryCloseTag(content: String): Boolean = HISTORY_CLOSE_TAG_REGEX.matches(content)
+
+    /**
+     * 对同时包含长篇静态设定（如 {{getvar::...}}）与小段动态输入块（如 <dreamer_input>{{lastUserMessage}}</dreamer_input>）
+     * 的混合条目执行智能动静分离：
+     * - 返回 (staticPart, dynamicPart)
+     * - 纯静态条目返回 (content, "")
+     * - 纯动态条目返回 ("", content)
+     * - 混合条目返回 (静态设定主体 -> Zone A 命中缓存, 动态最新输入 -> Zone C 沉底)
+     */
+    fun splitStaticAndDynamic(rawContent: String): Pair<String, String> {
+        if (!isDynamicContent(rawContent)) {
+            return rawContent to ""
+        }
+        val inputMatches = DYNAMIC_INPUT_BLOCK_REGEX.findAll(rawContent)
+            .filter { isDynamicContent(it.value) }
+            .toList()
+        if (inputMatches.isNotEmpty()) {
+            val dynamicPart = inputMatches.joinToString("\n\n") { it.value.trim() }
+            var remaining = rawContent
+            inputMatches.asReversed().forEach { match ->
+                remaining = remaining.removeRange(match.range)
+            }
+            val staticPart = remaining.trim()
+            if (staticPart.length >= 40 && !isDynamicContent(staticPart)) {
+                return staticPart to dynamicPart
+            }
+        }
+        val paragraphs = rawContent.split(Regex("""\r?\n\r?\n+"""))
+        if (paragraphs.size >= 2) {
+            val staticParas = mutableListOf<String>()
+            val dynamicParas = mutableListOf<String>()
+            paragraphs.forEach { para ->
+                if (isDynamicContent(para)) {
+                    dynamicParas += para.trim()
+                } else if (para.isNotBlank()) {
+                    staticParas += para.trim()
+                }
+            }
+            val staticJoined = staticParas.joinToString("\n\n").trim()
+            val dynamicJoined = dynamicParas.joinToString("\n\n").trim()
+            if (staticJoined.length >= 80 && dynamicJoined.isNotEmpty()) {
+                return staticJoined to dynamicJoined
+            }
+        }
+        return "" to rawContent
+    }
+
     /**
      * 对 prompt_order 进行 DeepSeek 极速前缀缓存友好的自动拓扑排序：
-     * 1. Zone A（静态前缀区）：所有固定不变的内容（包括静态 marker 如 main, worldInfoBefore, charDescription 等，以及所有不含每轮变动动态宏的文本条目，不论原本在预设中的位置或其角色是 SYSTEM、USER 还是 ASSISTANT）统一置顶在对话历史之前；
-     * 2. Zone B（稳定历史区）：chatHistory 提示词放置在静态前缀之后；
-     * 3. Zone C（动态后缀区）：每轮对话都变的内容（worldInfoAfter 动态世界书、含有时间/日期/输入/随机宏的提示词、In-Chat 深度注入提示词等）沉底在最后。
+     * 1. Zone A（静态前缀区）：所有固定不变的内容（包括静态 marker 如 main, worldInfoBefore, charDescription 等，以及所有静态或动静混合的文本条目）统一置顶在对话历史之前；
+     * 2. Zone B（稳定历史区）：chatHistory 及其紧邻包裹标签放置在静态前缀之后；
+     * 3. Zone C（动态后缀区）：每轮对话都变的内容（worldInfoAfter 动态世界书、纯动态宏提示词、In-Chat 深度注入提示词、历史之后的 Assistant 预填充等）沉底在最后。
      *
      * 保持各分区内部条目原本的相对顺序。
      */
     fun optimizeOrder(prompts: List<StPrompt>, order: List<StPromptOrderEntry>): List<StPromptOrderEntry> {
         val promptMap = prompts.associateBy { it.identifier }
         val zoneA = mutableListOf<StPromptOrderEntry>()
+        val zoneBPrefix = mutableListOf<StPromptOrderEntry>()
         val zoneB = mutableListOf<StPromptOrderEntry>()
+        val zoneBSuffix = mutableListOf<StPromptOrderEntry>()
         val zoneC = mutableListOf<StPromptOrderEntry>()
+
+        var seenChatHistory = false
+        var seenPostHistoryAssistant = false
 
         order.forEach { entry ->
             val prompt = promptMap[entry.identifier]
@@ -90,17 +164,31 @@ object StPromptAssembler {
             }
             if (prompt.marker) {
                 when (prompt.identifier) {
-                    "chatHistory" -> zoneB += entry
+                    "chatHistory" -> {
+                        seenChatHistory = true
+                        zoneB += entry
+                    }
                     "worldInfoAfter" -> zoneC += entry
                     else -> zoneA += entry
                 }
-            } else if (prompt.isInChat || isDynamicContent(prompt.content)) {
-                // 每轮变动的内容（深度注入、动态时间宏、用户输入宏、随机宏等）沉底到 Zone C
-                zoneC += entry
             } else {
-                // 所有固定不变的文本条目（无论预设作者原本放置在何处，无论 SYSTEM、USER 还是 ASSISTANT 角色），
-                // 均置顶到 Zone A（对话历史之前），保证最大化缓存命中
-                zoneA += entry
+                if (seenChatHistory && prompt.role == MessageRole.ASSISTANT) {
+                    seenPostHistoryAssistant = true
+                }
+                when {
+                    isHistoryOpenTag(prompt.content) -> zoneBPrefix += entry
+                    isHistoryCloseTag(prompt.content) -> zoneBSuffix += entry
+                    prompt.isInChat || seenPostHistoryAssistant -> zoneC += entry
+                    isDynamicContent(prompt.content) -> {
+                        val (staticPart, _) = splitStaticAndDynamic(prompt.content)
+                        if (staticPart.isNotBlank()) {
+                            zoneA += entry
+                        } else {
+                            zoneC += entry
+                        }
+                    }
+                    else -> zoneA += entry
+                }
             }
         }
 
@@ -111,7 +199,7 @@ object StPromptAssembler {
             }
         }
 
-        return zoneA + zoneB + zoneC
+        return zoneA + zoneBPrefix + zoneB + zoneBSuffix + zoneC
     }
 
     fun assemble(req: StAssemblyRequest): StAssemblyResult {
@@ -132,21 +220,41 @@ object StPromptAssembler {
             history = req.liveMessages,
         )
 
-        // Pass 1 & Pass 2: 变量预扫描与拓扑依赖展开
+        val lockedVars = req.userLockedVariables ?: req.variables.toMap()
+        val enabledPromptsInOrder = entries
+            .filter { it.enabled }
+            .mapNotNull { promptMap[it.identifier] }
+
+        // 清理上轮残留的预设开关变量（未被用户手动锁定的），避免多轮对话中 addvar 重复累加或关闭开关后残留旧值
+        val presetMutatedVarNames = StMacroResolver.findMutatedVariableNames(preset.prompts)
+        presetMutatedVarNames.forEach { key ->
+            if (key !in lockedVars) {
+                req.variables.remove(key)
+            }
+        }
+
+        // Pass 1 & Pass 2: 按启用顺序预扫描变量与拓扑依赖展开（供前向引用的纯 setvar 变量使用）
         val preScannedVars = StMacroResolver.preScanVariables(
-            prompts = preset.prompts,
-            persistedVariables = req.variables,
+            prompts = enabledPromptsInOrder.ifEmpty { preset.prompts },
+            persistedVariables = lockedVars,
             context = macroContext,
             random = req.random,
             now = req.now,
         )
-        req.variables.putAll(preScannedVars)
+        // 含 addvar 的变量交由 entries 顺序循环执行一次，避免预扫描 + 主循环双重累加
+        val additiveVarNames = StMacroResolver.findAdditiveVariableNames(enabledPromptsInOrder.ifEmpty { preset.prompts })
+        preScannedVars.forEach { (key, value) ->
+            if (key !in additiveVarNames || key in lockedVars) {
+                req.variables[key] = value
+            }
+        }
 
         val macroResolver = StMacroResolver(
             variables = req.variables,
             globalVariables = req.globalVariables,
             random = req.random,
             now = req.now,
+            lockedVariables = lockedVars,
         )
 
         val timeMacroRegex = Regex("""\{\{\s*(time|cur_time|datetime|cur_date|date|isotime|isodate|weekday)\s*\}\}""", RegexOption.IGNORE_CASE)
@@ -159,6 +267,8 @@ object StPromptAssembler {
         var skippedEmpty = 0
         var markerCount = 0
         var rendered = 0
+        var seenChatHistoryInLoop = false
+        var seenPostHistoryAssistant = false
 
         entries.forEach { entry ->
             if (!entry.enabled) {
@@ -189,8 +299,41 @@ object StPromptAssembler {
             }
             if (prompt.marker) {
                 markerCount++
+                if (prompt.identifier == "chatHistory") {
+                    seenChatHistoryInLoop = true
+                }
                 nodes += Node.Marker(prompt.identifier, prompt)
                 return@forEach
+            }
+            if (seenChatHistoryInLoop && prompt.role == MessageRole.ASSISTANT) {
+                seenPostHistoryAssistant = true
+            }
+            if (preset.autoOptimizeOrder && !seenPostHistoryAssistant && isDynamicContent(prompt.content)) {
+                val (rawStatic, rawDynamic) = splitStaticAndDynamic(prompt.content)
+                if (rawStatic.isNotBlank() && rawDynamic.isNotBlank()) {
+                    val resolvedStatic = macroResolver.render(rawStatic, macroContext)
+                    val resolvedDynamic = macroResolver.render(rawDynamic, macroContext)
+                    if (resolvedStatic.isBlank() && resolvedDynamic.isBlank()) {
+                        skippedEmpty++
+                        return@forEach
+                    }
+                    rendered++
+                    if (resolvedStatic.isNotBlank()) {
+                        nodes += Node.Text(
+                            message = textMessage(prompt.role, resolvedStatic),
+                            role = prompt.role,
+                            isDynamic = false,
+                        )
+                    }
+                    if (resolvedDynamic.isNotBlank()) {
+                        nodes += Node.Text(
+                            message = textMessage(prompt.role, resolvedDynamic),
+                            role = prompt.role,
+                            isDynamic = true,
+                        )
+                    }
+                    return@forEach
+                }
             }
             val content = macroResolver.render(prompt.content, macroContext)
             if (content.isBlank()) {
@@ -198,11 +341,13 @@ object StPromptAssembler {
                 return@forEach
             }
             rendered++
-            val isDynamic = isDynamicContent(prompt.content)
+            val isDynamic = isDynamicContent(prompt.content) || seenPostHistoryAssistant
             nodes += Node.Text(
                 message = textMessage(prompt.role, content),
                 role = prompt.role,
                 isDynamic = isDynamic,
+                isHistoryOpenWrapper = isHistoryOpenTag(prompt.content),
+                isHistoryCloseWrapper = isHistoryCloseTag(prompt.content),
             )
         }
 
@@ -218,6 +363,8 @@ object StPromptAssembler {
         // 【Zone B: 稳定历史区 (Append-only Stream)】-> 严格单调递增流
         // =========================================================================
         val zoneB = mutableListOf<UIMessage>()
+        val historyOpenWrappers = mutableListOf<UIMessage>()
+        val historyCloseWrappers = mutableListOf<UIMessage>()
 
         // =========================================================================
         // 【Zone C: 动态后缀区 (Turn-Tail Dynamic)】-> 所有易变内容沉底
@@ -231,7 +378,7 @@ object StPromptAssembler {
             when (identifier) {
                 "main" -> {
                     val text = resolveMainPrompt(prompt, character, req.assistantSystemPrompt)
-                    if (text.isNotBlank()) targetList += systemMessage(text)
+                    if (text.isNotBlank()) targetList += textMessage(prompt.role, text)
                 }
                 "worldInfoBefore" -> {
                     if (preset.autoOptimizeOrder) {
@@ -239,12 +386,12 @@ object StPromptAssembler {
                             targetList += req.worldInfo.constantEntries.map { it.toSystemMessage() }
                         } else if (req.worldInfo.before.isNotBlank()) {
                             val text = macroResolver.render(req.worldInfo.before, macroContext)
-                            if (text.isNotBlank()) targetList += systemMessage(text)
+                            if (text.isNotBlank()) targetList += textMessage(prompt.role, text)
                         }
                     } else {
                         if (req.worldInfo.before.isNotBlank()) {
                             val text = macroResolver.render(req.worldInfo.before, macroContext)
-                            if (text.isNotBlank()) targetList += systemMessage(text)
+                            if (text.isNotBlank()) targetList += textMessage(prompt.role, text)
                         } else if (req.worldInfo.constantEntries.isNotEmpty()) {
                             targetList += req.worldInfo.constantEntries.map { it.toSystemMessage() }
                         }
@@ -256,28 +403,28 @@ object StPromptAssembler {
                             zoneC += req.worldInfo.dynamicTriggeredEntries.map { it.toSystemMessage() }
                         } else if (req.worldInfo.after.isNotBlank()) {
                             val text = macroResolver.render(req.worldInfo.after, macroContext)
-                            if (text.isNotBlank()) zoneC += systemMessage(text)
+                            if (text.isNotBlank()) zoneC += textMessage(prompt.role, text)
                         }
                     } else {
                         if (req.worldInfo.after.isNotBlank()) {
                             val text = macroResolver.render(req.worldInfo.after, macroContext)
-                            if (text.isNotBlank()) targetList += systemMessage(text)
+                            if (text.isNotBlank()) targetList += textMessage(prompt.role, text)
                         } else if (req.worldInfo.dynamicTriggeredEntries.isNotEmpty()) {
                             targetList += req.worldInfo.dynamicTriggeredEntries.map { it.toSystemMessage() }
                         }
                     }
                 }
                 "charDescription" -> character?.description?.takeIf { it.isNotBlank() }?.let {
-                    targetList += systemMessage(it)
+                    targetList += textMessage(prompt.role, it)
                 }
                 "charPersonality" -> character?.personality?.takeIf { it.isNotBlank() }?.let {
-                    targetList += systemMessage(it)
+                    targetList += textMessage(prompt.role, it)
                 }
                 "personaDescription" -> if (req.personaDescription.isNotBlank()) {
-                    targetList += systemMessage(req.personaDescription)
+                    targetList += textMessage(prompt.role, req.personaDescription)
                 }
                 "scenario" -> character?.scenario?.takeIf { it.isNotBlank() }?.let {
-                    targetList += systemMessage(it)
+                    targetList += textMessage(prompt.role, it)
                 }
                 "dialogueExamples" -> character?.mesExample?.takeIf { it.isNotBlank() }?.let {
                     targetList += parseDialogueExamples(
@@ -320,12 +467,15 @@ object StPromptAssembler {
             nodes.forEach { node ->
                 when (node) {
                     is Node.Text -> {
-                        if (node.isDynamic) {
-                            zoneC += node.message
-                        } else {
-                            // 所有固定不变的文本条目（无论 SYSTEM、USER 还是 ASSISTANT 角色），
-                            // 始终置于 Zone A 静态前缀区（在历史之前），保证最大化缓存命中
-                            zoneA += node.message
+                        when {
+                            node.isHistoryOpenWrapper -> historyOpenWrappers += node.message
+                            node.isHistoryCloseWrapper -> historyCloseWrappers += node.message
+                            node.isDynamic -> zoneC += node.message
+                            else -> {
+                                // 所有固定不变的文本条目（无论 SYSTEM、USER 还是 ASSISTANT 角色），
+                                // 始终置于 Zone A 静态前缀区（在历史之前），保证最大化缓存命中
+                                zoneA += node.message
+                            }
                         }
                     }
                     is Node.Marker -> {
@@ -346,8 +496,10 @@ object StPromptAssembler {
                 }
             }
 
-            // Zone B: 填充历史会话流
+            // 将 <dream_history> 置于 Zone A 末尾（紧贴 Zone B 之前），</dream_history> 置于 Zone C 开头（紧贴 Zone B 之后）
+            zoneA += historyOpenWrappers
             populateZoneB()
+            zoneC.addAll(0, historyCloseWrappers)
         } else {
             // 手动排序 / 禁用自动优化排序：严格按照 prompt_order 中条目的相对位置组装
             nodes.forEach { node ->
@@ -406,17 +558,16 @@ object StPromptAssembler {
             )
         }
 
-        val messages = (zoneA + zoneB + zoneC).toMutableList()
         val historyStart = zoneA.size
-        val historyEnd = zoneA.size + zoneB.size
-
         insertInChat(
-            messages = messages,
+            messages = zoneB,
             prompts = inChat,
             warnings = warnings,
-            historyStart = historyStart,
-            historyEnd = historyEnd,
+            historyStart = 0,
+            historyEnd = zoneB.size,
         )
+
+        val messages = (zoneA + zoneB + zoneC).toMutableList()
 
         var finalMessages = if (req.flattenSystemMessages) {
             flattenSystemMessages(messages, historyStart.coerceIn(0, messages.size))
@@ -427,7 +578,9 @@ object StPromptAssembler {
             finalMessages = squashConsecutiveSystem(finalMessages)
         }
         if (preset.settings.assistantPrefill.isNotBlank()) {
-            finalMessages = finalMessages + UIMessage.assistant(preset.settings.assistantPrefill).copy(isSynthetic = true)
+            val prefillMsg = UIMessage.assistant(preset.settings.assistantPrefill).copy(isSynthetic = true)
+            zoneC += prefillMsg
+            finalMessages = finalMessages + prefillMsg
         }
         if (unknownMarkers.isNotEmpty()) {
             warnings += "未知 marker：${unknownMarkers.joinToString("、")}（已跳过）"
@@ -450,7 +603,13 @@ object StPromptAssembler {
             warnings = (warnings + preset.warnings + req.worldInfo.warnings).distinct(),
             finalMessageCount = finalMessages.size,
         )
-        return StAssemblyResult(finalMessages, report)
+        return StAssemblyResult(
+            messages = finalMessages,
+            report = report,
+            zoneAMessages = zoneA.filter { it.parts.isNotEmpty() },
+            zoneBMessages = zoneB.filter { it.parts.isNotEmpty() },
+            zoneCMessages = zoneC.filter { it.parts.isNotEmpty() },
+        )
     }
 
     fun assemble(
@@ -468,6 +627,7 @@ object StPromptAssembler {
         milestoneMessageIds: Set<String> = emptySet(),
         historyAlreadyTrimmed: Boolean = false,
         variables: MutableMap<String, String> = mutableMapOf(),
+        userLockedVariables: Map<String, String>? = null,
         globalVariables: MutableMap<String, String> = mutableMapOf(),
         random: Random = Random.Default,
         now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
@@ -488,6 +648,7 @@ object StPromptAssembler {
             milestoneMessageIds = milestoneMessageIds,
             historyAlreadyTrimmed = historyAlreadyTrimmed,
             variables = variables,
+            userLockedVariables = userLockedVariables,
             globalVariables = globalVariables,
             random = random,
             now = now,
@@ -548,6 +709,7 @@ object StPromptAssembler {
 
     /**
      * 详情页编辑列表：先按当前顺序列出，再把未挂到 prompt_order 的提示追加到末尾。
+     * 同时根据当前是否开启 autoOptimizeOrder，标注每个条目的 Zone 归属。
      */
     fun editablePrompts(preset: StPreset): List<StPromptRow> {
         val bucket = chooseBucket(preset, mutableListOf())
@@ -557,15 +719,76 @@ object StPromptAssembler {
         }
         val rows = mutableListOf<StPromptRow>()
         val inOrder = mutableSetOf<String>()
+        var seenChatHistory = false
+        var seenPostHistoryAssistant = false
         entries.forEachIndexed { index, entry ->
             inOrder += entry.identifier
             val prompt = promptMap[entry.identifier] ?: return@forEachIndexed
-            rows += StPromptRow(prompt, index, entry.enabled)
+            val zone = if (entry.enabled) {
+                classifyPromptZone(
+                    preset = preset,
+                    prompt = prompt,
+                    seenChatHistory = seenChatHistory,
+                    seenPostHistoryAssistant = seenPostHistoryAssistant,
+                )
+            } else {
+                StPromptZone.NONE
+            }
+            if (entry.enabled && prompt.marker && prompt.identifier == "chatHistory") {
+                seenChatHistory = true
+            }
+            if (entry.enabled && seenChatHistory && !prompt.marker && prompt.role == MessageRole.ASSISTANT) {
+                seenPostHistoryAssistant = true
+            }
+            rows += StPromptRow(prompt, index, entry.enabled, zone)
         }
         preset.prompts.filter { it.identifier !in inOrder }.forEach { prompt ->
-            rows += StPromptRow(prompt, null, false)
+            rows += StPromptRow(prompt, null, false, StPromptZone.NONE)
         }
         return rows
+    }
+
+    private fun classifyPromptZone(
+        preset: StPreset,
+        prompt: StPrompt,
+        seenChatHistory: Boolean,
+        seenPostHistoryAssistant: Boolean,
+    ): StPromptZone {
+        if (prompt.marker) {
+            return when (prompt.identifier) {
+                "chatHistory", "dialogueExamples" -> StPromptZone.ZONE_B
+                else -> if (preset.autoOptimizeOrder || !seenChatHistory) StPromptZone.ZONE_A else StPromptZone.ZONE_C
+            }
+        }
+        if (StMacroResolver.isVariableMutationOnly(prompt.content)) {
+            return StPromptZone.VARIABLE_ONLY
+        }
+        if (prompt.content.isBlank()) {
+            return StPromptZone.NONE
+        }
+        if (prompt.isInChat) {
+            return StPromptZone.ZONE_B
+        }
+        if (!preset.autoOptimizeOrder) {
+            return if (!seenChatHistory) StPromptZone.ZONE_A else StPromptZone.ZONE_C
+        }
+        if (isHistoryOpenTag(prompt.content)) {
+            return StPromptZone.ZONE_A
+        }
+        if (isHistoryCloseTag(prompt.content)) {
+            return StPromptZone.ZONE_C
+        }
+        val (staticPart, dynamicPart) = splitStaticAndDynamic(prompt.content)
+        if (staticPart.isNotBlank() && dynamicPart.isNotBlank()) {
+            return StPromptZone.ZONE_A_AND_C
+        }
+        if (dynamicPart.isNotBlank()) {
+            return StPromptZone.ZONE_C
+        }
+        if (seenChatHistory && (prompt.role == MessageRole.ASSISTANT || seenPostHistoryAssistant)) {
+            return StPromptZone.ZONE_C
+        }
+        return StPromptZone.ZONE_A
     }
 
     private fun chooseBucket(preset: StPreset, warnings: MutableList<String>): StPromptOrderBucket {
@@ -730,6 +953,7 @@ object StPromptAssembler {
         history: List<UIMessage>,
     ): StMacroContext {
         val lastUser = history.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
+        val lastChar = history.lastOrNull { it.role == MessageRole.ASSISTANT }?.toText().orEmpty()
         return StMacroContext(
             characterName = character?.name.orEmpty(),
             userName = personaName,
@@ -741,6 +965,8 @@ object StPromptAssembler {
             modelName = modelName,
             input = lastUser,
             lastMessage = history.lastOrNull()?.toText().orEmpty(),
+            lastUserMessage = lastUser,
+            lastCharMessage = lastChar,
         )
     }
 
@@ -793,6 +1019,8 @@ object StPromptAssembler {
             val message: UIMessage,
             val role: MessageRole,
             val isDynamic: Boolean,
+            val isHistoryOpenWrapper: Boolean = false,
+            val isHistoryCloseWrapper: Boolean = false,
         ) : Node
         data class Marker(val identifier: String, val prompt: StPrompt) : Node
     }
