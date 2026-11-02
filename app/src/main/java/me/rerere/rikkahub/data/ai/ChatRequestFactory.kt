@@ -329,21 +329,11 @@ class ChatRequestFactory(
                 """.trimIndent()
                 add(UIMessage.system(prompt = cpPrompt).copy(isSynthetic = true))
             }
-            val effectiveMessages = if (turn.checkpoint != null) {
-                val cp = turn.checkpoint
-                val startIdx = (cp.startFloor - 1).coerceAtLeast(0)
-                val endIdx = cp.boundaryFloor.coerceAtMost(messages.size)
-                val before = if (startIdx > 0 && startIdx <= messages.size) messages.take(startIdx) else emptyList()
-                val middleMilestones = if (startIdx < endIdx) {
-                    messages.subList(startIdx, endIdx).filter { msg ->
-                        turn.milestoneMessageIds.contains(msg.id.toString())
-                    }
-                } else emptyList()
-                val after = if (endIdx < messages.size) messages.drop(endIdx) else emptyList()
-                before + middleMilestones + after
-            } else {
-                messages
-            }
+            val effectiveMessages = StPromptAssembler.trimHistoryForCheckpoint(
+                messages = messages,
+                checkpoint = turn.checkpoint,
+                milestoneMessageIds = turn.milestoneMessageIds,
+            )
             addAll(effectiveMessages.limitContext(assistant.contextMessageLimit))
         }.transforms(
             transformers = inputTransformers,
@@ -388,7 +378,12 @@ class ChatRequestFactory(
         generationType: StGenerationType,
     ): StepRequest {
         val assistant = turn.assistant
-        val history = messages.limitContext(assistant.contextMessageLimit)
+        val history = StPromptAssembler.trimHistoryForCheckpoint(
+            messages = messages,
+            checkpoint = turn.checkpoint,
+            milestoneMessageIds = turn.milestoneMessageIds,
+        )
+            .limitContext(assistant.contextMessageLimit)
             .transforms(
                 transformers = presetHistoryTransformers,
                 context = context,
@@ -477,6 +472,7 @@ class ChatRequestFactory(
             worldInfo = worldInfo,
             checkpoint = turn.checkpoint,
             milestoneMessageIds = turn.milestoneMessageIds,
+            historyAlreadyTrimmed = true,
             variables = variables,
             globalVariables = globalVariables,
             flattenSystemMessages = flattenSystemMessages,

@@ -449,4 +449,107 @@ class StPromptAssemblerTest {
             identifiers,
         )
     }
+
+    @Test
+    fun `autoHide compacted floors still sends new user message in ST preset mode`() {
+        val preset = preset(
+            prompts = listOf(
+                p("main", marker = true),
+                p("chatHistory", marker = true),
+            ),
+            order = listOf(
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("chatHistory", true),
+            ),
+        )
+        // Floors 1-4 are compacted with autoHide=true (so isHidden=true), Floor 5 is the new user input
+        val m1 = UIMessage.user("Turn 1").copy(isHidden = true)
+        val m2 = UIMessage.assistant("Reply 1 (milestone)").copy(isHidden = true)
+        val m3 = UIMessage.user("Turn 2").copy(isHidden = true)
+        val m4 = UIMessage.assistant("Reply 2").copy(isHidden = true)
+        val m5 = UIMessage.user("New message after compact")
+
+        val checkpoint = ConversationCheckpointEntity(
+            conversationId = "conv-compact",
+            startFloor = 1,
+            boundaryNodeId = m4.id.toString(),
+            boundaryFloor = 4,
+            summaryContent = "Compacted summary 1-4",
+            originalTokens = 4000,
+            compressedTokens = 200,
+        )
+
+        val trimmed = StPromptAssembler.trimHistoryForCheckpoint(
+            messages = listOf(m1, m2, m3, m4, m5),
+            checkpoint = checkpoint,
+            milestoneMessageIds = setOf(m2.id.toString()),
+        )
+        assertEquals(listOf("Reply 1 (milestone)", "New message after compact"), trimmed.map { it.toText() })
+
+        val result = StPromptAssembler.assemble(
+            preset = preset,
+            history = trimmed,
+            assistantSystemPrompt = "SYSTEM",
+            checkpoint = checkpoint,
+            milestoneMessageIds = setOf(m2.id.toString()),
+            historyAlreadyTrimmed = true,
+        )
+        val texts = result.messages.map { it.toText() }
+        assertEquals("SYSTEM", texts[0])
+        assertTrue(texts[1].contains("Compacted summary 1-4"))
+        assertTrue(texts.contains("Reply 1 (milestone)"))
+        assertTrue(texts.contains("New message after compact"))
+    }
+
+    @Test
+    fun `manual order mode preserves prompt positions after chatHistory without hoisting to Zone A`() {
+        val preset = preset(
+            prompts = listOf(
+                p("main", marker = true),
+                p("chatHistory", marker = true),
+                p("postStatic", "STATIC_AFTER_HISTORY", role = MessageRole.SYSTEM),
+            ),
+            order = listOf(
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("chatHistory", true),
+                StPromptOrderEntry("postStatic", true),
+            ),
+        ).copy(autoOptimizeOrder = false)
+
+        val history = listOf(UIMessage.user("hello"), UIMessage.assistant("world"))
+        val result = StPromptAssembler.assemble(
+            preset = preset,
+            history = history,
+            assistantSystemPrompt = "MAIN",
+        )
+        assertEquals(
+            listOf("MAIN", "hello", "world", "STATIC_AFTER_HISTORY"),
+            result.messages.map { it.toText() },
+        )
+    }
+
+    @Test
+    fun `editablePrompts merges paired worldInfoBefore and worldInfoAfter into single placeholder`() {
+        val preset = preset(
+            prompts = listOf(
+                p("main", marker = true),
+                p("worldInfoBefore", marker = true).copy(name = "World Info (before)"),
+                p("chatHistory", marker = true),
+                p("worldInfoAfter", marker = true).copy(name = "World Info (after)"),
+                p("jailbreak", "JB"),
+            ),
+            order = listOf(
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("worldInfoBefore", true),
+                StPromptOrderEntry("chatHistory", true),
+                StPromptOrderEntry("worldInfoAfter", true),
+                StPromptOrderEntry("jailbreak", true),
+            ),
+        )
+        val rows = StPromptAssembler.editablePrompts(preset)
+        assertEquals(listOf("main", "worldInfoBefore", "chatHistory", "jailbreak"), rows.map { it.prompt.identifier })
+        assertEquals(listOf(0, 1, 2, 3), rows.map { it.orderIndex })
+        assertEquals("worldInfoAfter", rows[1].pairedPrompt?.identifier)
+        assertEquals("World Info (before & after)", rows[1].prompt.name)
+    }
 }

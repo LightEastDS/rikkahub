@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.data.db.dao.StPresetDao
@@ -30,10 +31,18 @@ data class StPresetRecord(
     val enabled: Boolean,
     val importedAt: Long,
     val sortIndex: Int,
+    /** 是否启用自动缓存优化排序；为 false 时使用手动/预设原始排序。 */
+    val autoOptimizeOrder: Boolean = preset.autoOptimizeOrder,
     /** 用户改过 prompt_order；为 true 时详情页显示“自定义排序”。 */
     val hasCustomOrder: Boolean = false,
     /** 副本内容或排序与原始 JSON 不同；用于显示“恢复默认”。 */
     val isModified: Boolean = false,
+)
+
+@Serializable
+data class StCustomOrderConfig(
+    val autoOptimizeOrder: Boolean = true,
+    val order: List<StPromptOrderEntry> = emptyList(),
 )
 
 class StPresetRepository(
@@ -93,25 +102,70 @@ class StPresetRepository(
 
     /** 启停 prompt_order 里的一条；结构性 marker 不允许停用。 */
     suspend fun setPromptEnabled(id: Uuid, orderIndex: Int, enabled: Boolean) {
+        val record = getRecord(id) ?: return
         val order = currentOrder(id) ?: return
+        val grouped = groupOrderByVisibleRows(record.preset, order)
+        if (orderIndex in grouped.indices) {
+            val group = grouped[orderIndex]
+            if (group.any { StPresetMarkers.isProtected(it.identifier) }) return
+            grouped[orderIndex] = group.map { it.copy(enabled = enabled) }
+            saveOrder(id, grouped.flatten(), autoOptimizeOrder = record.autoOptimizeOrder)
+            return
+        }
         if (orderIndex !in order.indices) return
         if (StPresetMarkers.isProtected(order[orderIndex].identifier)) return
         val updated = order.toMutableList().also {
             it[orderIndex] = it[orderIndex].copy(enabled = enabled)
         }
-        saveOrder(id, updated)
+        saveOrder(id, updated, autoOptimizeOrder = record.autoOptimizeOrder)
     }
 
-    /** 上移/下移一条 prompt；[delta] 为 -1 或 +1。 */
+    /** 上移/下移一条 prompt；[delta] 为 -1 或 +1。手动调整顺序会自动关闭自动优化排序。 */
     suspend fun movePrompt(id: Uuid, orderIndex: Int, delta: Int) {
+        reorderPrompt(id, orderIndex, orderIndex + delta)
+    }
+
+    /** 拖拽移动可见列表中的条目（支持成对合并的 marker 同步移动），并切换为手动排序模式。 */
+    suspend fun reorderPrompt(id: Uuid, fromIndex: Int, toIndex: Int) {
+        val record = getRecord(id) ?: return
         val order = currentOrder(id) ?: return
-        val target = orderIndex + delta
-        if (orderIndex !in order.indices || target !in order.indices) return
-        val updated = order.toMutableList().also {
-            val item = it.removeAt(orderIndex)
-            it.add(target, item)
+        val grouped = groupOrderByVisibleRows(record.preset, order)
+        if (fromIndex !in grouped.indices || toIndex !in grouped.indices || fromIndex == toIndex) return
+        val item = grouped.removeAt(fromIndex)
+        grouped.add(toIndex, item)
+        saveOrder(id, grouped.flatten(), autoOptimizeOrder = false)
+    }
+
+    /** 切换是否启用自动缓存优化排序。 */
+    suspend fun setAutoOptimizeOrder(id: Uuid, autoOptimize: Boolean) {
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val record = getRecord(id) ?: return
+        val current = currentOrder(id) ?: return
+        if (autoOptimize) {
+            val optimized = StPromptAssembler.optimizeOrder(record.preset.prompts, current)
+            saveOrder(id, optimized, autoOptimizeOrder = true)
+        } else {
+            val enabledById = current.associate { it.identifier to it.enabled }
+            val rawPreset = runCatching {
+                StPresetParser.parse(
+                    rawJson = entity.rawJson,
+                    fallbackName = entity.name,
+                    id = id,
+                    autoOptimizeOrder = false,
+                ).preset
+            }.getOrNull()
+            val rawOrder = rawPreset?.promptOrder
+                ?.firstOrNull { it.characterId == StPromptOrderBucket.GLOBAL_CHARACTER_ID }
+                ?.order
+                ?: rawPreset?.promptOrder?.firstOrNull()?.order
+                ?: current
+            val restoredOrder = rawOrder.map { entry ->
+                val enabled = enabledById[entry.identifier] ?: entry.enabled
+                entry.copy(enabled = if (StPresetMarkers.isProtected(entry.identifier)) true else enabled)
+            }
+            saveOrder(id, restoredOrder, autoOptimizeOrder = false)
         }
-        saveOrder(id, updated)
     }
 
     /** 对指定预设的生效 prompt_order 执行 DeepSeek 极速前缀缓存友好的自动拓扑排序 */
@@ -119,7 +173,37 @@ class StPresetRepository(
         val record = getRecord(id) ?: return
         val order = currentOrder(id) ?: return
         val optimized = StPromptAssembler.optimizeOrder(record.preset.prompts, order)
-        saveOrder(id, optimized)
+        saveOrder(id, optimized, autoOptimizeOrder = true)
+    }
+
+    private fun groupOrderByVisibleRows(
+        preset: StPreset,
+        order: List<StPromptOrderEntry>,
+    ): MutableList<List<StPromptOrderEntry>> {
+        val entryById = order.associateBy { it.identifier }
+        val rows = StPromptAssembler.editablePrompts(preset).filter { it.orderIndex != null }
+        val grouped = mutableListOf<List<StPromptOrderEntry>>()
+        val consumedIds = hashSetOf<String>()
+        for (row in rows) {
+            val primary = entryById[row.prompt.identifier]
+                ?: StPromptOrderEntry(row.prompt.identifier, row.enabled)
+            consumedIds += primary.identifier
+            val pairedPrompt = row.pairedPrompt
+            if (pairedPrompt != null) {
+                val secondary = entryById[pairedPrompt.identifier]
+                    ?: StPromptOrderEntry(pairedPrompt.identifier, row.enabled)
+                consumedIds += secondary.identifier
+                grouped += listOf(primary, secondary)
+            } else {
+                grouped += listOf(primary)
+            }
+        }
+        order.forEach { entry ->
+            if (entry.identifier !in consumedIds) {
+                grouped += listOf(entry)
+            }
+        }
+        return grouped
     }
 
     /** 当前生效的 prompt_order；没有自定义时取预设原始桶。 */
@@ -132,10 +216,18 @@ class StPresetRepository(
             ?: record.preset.prompts.map { StPromptOrderEntry(it.identifier, true) }
     }
 
-    private suspend fun saveOrder(id: Uuid, order: List<StPromptOrderEntry>) {
+    private suspend fun saveOrder(
+        id: Uuid,
+        order: List<StPromptOrderEntry>,
+        autoOptimizeOrder: Boolean = true,
+    ) {
+        val config = StCustomOrderConfig(
+            autoOptimizeOrder = autoOptimizeOrder,
+            order = order,
+        )
         dao.setOrderJson(
             id = id.toString(),
-            orderJson = JsonInstant.encodeToString(order),
+            orderJson = JsonInstant.encodeToString(config),
         )
         cache.remove(id.toString())
     }
@@ -174,36 +266,68 @@ class StPresetRepository(
     suspend fun rawJson(id: Uuid): String? = dao.getById(id.toString())?.rawJson
 
     private fun StPresetEntity.toRecord(): StPresetRecord {
-        val parsed = (cache[id]?.preset) ?: StPresetParser.parse(
+        val config = decodeOrderConfig(orderJson)
+        val parsed = StPresetParser.parse(
             rawJson = rawJson,
             fallbackName = name,
             id = Uuid.parse(id),
+            autoOptimizeOrder = config.autoOptimizeOrder,
         ).preset
-        return toRecord(parsed.withCustomOrder(orderJson).withProtectedMarkersEnabled())
+        return toRecord(parsed.withCustomOrder(config).withProtectedMarkersEnabled(), config)
     }
 
-    private fun StPresetEntity.toRecord(preset: StPreset): StPresetRecord = StPresetRecord(
-        preset = preset.withProtectedMarkersEnabled(),
-        enabled = enabled,
-        importedAt = importedAt,
-        sortIndex = sortIndex,
-        hasCustomOrder = orderJson.isNotBlank(),
-        isModified = orderJson.isNotBlank() || rawJson != originalJson.ifBlank { rawJson },
-    )
+    private fun StPresetEntity.toRecord(
+        preset: StPreset,
+        config: StCustomOrderConfig = decodeOrderConfig(orderJson),
+    ): StPresetRecord {
+        val normalizedPreset = preset.copy(autoOptimizeOrder = config.autoOptimizeOrder).withProtectedMarkersEnabled()
+        return StPresetRecord(
+            preset = normalizedPreset,
+            enabled = enabled,
+            importedAt = importedAt,
+            sortIndex = sortIndex,
+            autoOptimizeOrder = config.autoOptimizeOrder,
+            hasCustomOrder = config.order.isNotEmpty() || !config.autoOptimizeOrder,
+            isModified = orderJson.isNotBlank() || rawJson != originalJson.ifBlank { rawJson },
+        )
+    }
 
-    private fun StPreset.withCustomOrder(orderJson: String): StPreset {
-        if (orderJson.isBlank()) return this
-        val order = runCatching {
-            JsonInstant.decodeFromString<List<StPromptOrderEntry>>(orderJson)
-        }.getOrNull() ?: return this
-        return copy(
-            promptOrder = listOf(
-                StPromptOrderBucket(
-                    characterId = StPromptOrderBucket.GLOBAL_CHARACTER_ID,
-                    order = order,
+    private fun StPreset.withCustomOrder(config: StCustomOrderConfig): StPreset {
+        val updated = if (config.order.isNotEmpty()) {
+            copy(
+                promptOrder = listOf(
+                    StPromptOrderBucket(
+                        characterId = StPromptOrderBucket.GLOBAL_CHARACTER_ID,
+                        order = config.order,
+                    )
                 )
             )
-        )
+        } else {
+            this
+        }
+        return updated.copy(autoOptimizeOrder = config.autoOptimizeOrder)
+    }
+
+    private fun decodeOrderConfig(orderJson: String): StCustomOrderConfig {
+        val trimmed = orderJson.trim()
+        if (trimmed.isEmpty()) return StCustomOrderConfig()
+        if (trimmed.startsWith("{")) {
+            runCatching {
+                return JsonInstant.decodeFromString<StCustomOrderConfig>(trimmed)
+            }
+        }
+        if (trimmed.startsWith("[")) {
+            val legacyOrder = runCatching {
+                JsonInstant.decodeFromString<List<StPromptOrderEntry>>(trimmed)
+            }.getOrNull()
+            if (legacyOrder != null) {
+                return StCustomOrderConfig(
+                    autoOptimizeOrder = false,
+                    order = legacyOrder,
+                )
+            }
+        }
+        return StCustomOrderConfig()
     }
 
     /** 结构性 marker 即使原预设里被停用，也强制启用；兜底逻辑仍然保留在组装器里。 */

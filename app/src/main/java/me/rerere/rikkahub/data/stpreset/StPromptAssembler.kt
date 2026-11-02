@@ -32,6 +32,7 @@ data class StAssemblyRequest(
     val worldInfo: StWorldInfoResult = StWorldInfoResult(),
     val checkpoint: ConversationCheckpointEntity? = null,
     val milestoneMessageIds: Set<String> = emptySet(),
+    val historyAlreadyTrimmed: Boolean = false,
     val variables: MutableMap<String, String> = mutableMapOf(),
     val globalVariables: MutableMap<String, String> = mutableMapOf(),
     val random: Random = Random.Default,
@@ -233,19 +234,37 @@ object StPromptAssembler {
                     if (text.isNotBlank()) targetList += systemMessage(text)
                 }
                 "worldInfoBefore" -> {
-                    if (req.worldInfo.constantEntries.isNotEmpty()) {
-                        targetList += req.worldInfo.constantEntries.map { it.toSystemMessage() }
-                    } else if (req.worldInfo.before.isNotBlank()) {
-                        val text = macroResolver.render(req.worldInfo.before, macroContext)
-                        if (text.isNotBlank()) targetList += systemMessage(text)
+                    if (preset.autoOptimizeOrder) {
+                        if (req.worldInfo.constantEntries.isNotEmpty()) {
+                            targetList += req.worldInfo.constantEntries.map { it.toSystemMessage() }
+                        } else if (req.worldInfo.before.isNotBlank()) {
+                            val text = macroResolver.render(req.worldInfo.before, macroContext)
+                            if (text.isNotBlank()) targetList += systemMessage(text)
+                        }
+                    } else {
+                        if (req.worldInfo.before.isNotBlank()) {
+                            val text = macroResolver.render(req.worldInfo.before, macroContext)
+                            if (text.isNotBlank()) targetList += systemMessage(text)
+                        } else if (req.worldInfo.constantEntries.isNotEmpty()) {
+                            targetList += req.worldInfo.constantEntries.map { it.toSystemMessage() }
+                        }
                     }
                 }
                 "worldInfoAfter" -> {
-                    if (req.worldInfo.dynamicTriggeredEntries.isNotEmpty()) {
-                        zoneC += req.worldInfo.dynamicTriggeredEntries.map { it.toSystemMessage() }
-                    } else if (req.worldInfo.after.isNotBlank()) {
-                        val text = macroResolver.render(req.worldInfo.after, macroContext)
-                        if (text.isNotBlank()) zoneC += systemMessage(text)
+                    if (preset.autoOptimizeOrder) {
+                        if (req.worldInfo.dynamicTriggeredEntries.isNotEmpty()) {
+                            zoneC += req.worldInfo.dynamicTriggeredEntries.map { it.toSystemMessage() }
+                        } else if (req.worldInfo.after.isNotBlank()) {
+                            val text = macroResolver.render(req.worldInfo.after, macroContext)
+                            if (text.isNotBlank()) zoneC += systemMessage(text)
+                        }
+                    } else {
+                        if (req.worldInfo.after.isNotBlank()) {
+                            val text = macroResolver.render(req.worldInfo.after, macroContext)
+                            if (text.isNotBlank()) targetList += systemMessage(text)
+                        } else if (req.worldInfo.dynamicTriggeredEntries.isNotEmpty()) {
+                            targetList += req.worldInfo.dynamicTriggeredEntries.map { it.toSystemMessage() }
+                        }
                     }
                 }
                 "charDescription" -> character?.description?.takeIf { it.isNotBlank() }?.let {
@@ -281,23 +300,15 @@ object StPromptAssembler {
                     </conversation_summary>
                     """.trimIndent()
                 )
-                // 高光时刻穿透 (Milestone Whitelist)：压缩区间内被收藏/固定的非隐藏消息
-                val boundaryIndex = req.liveMessages.indexOfLast { it.id.toString() == req.checkpoint.boundaryNodeId }
-                val startIdx = (req.checkpoint.startFloor - 1).coerceAtLeast(0)
-                val beforeCheckpoint = if (boundaryIndex >= 0) {
-                    if (startIdx <= boundaryIndex) req.liveMessages.subList(startIdx, boundaryIndex + 1) else emptyList()
-                } else if (req.checkpoint.boundaryFloor in 1..req.liveMessages.size) {
-                    if (startIdx < req.checkpoint.boundaryFloor) req.liveMessages.subList(startIdx, req.checkpoint.boundaryFloor) else emptyList()
+                if (req.historyAlreadyTrimmed) {
+                    zoneB += req.liveMessages.filterNot { it.isHidden }
                 } else {
-                    emptyList()
+                    zoneB += trimHistoryForCheckpoint(
+                        messages = req.liveMessages,
+                        checkpoint = req.checkpoint,
+                        milestoneMessageIds = req.milestoneMessageIds,
+                    )
                 }
-                val milestones = beforeCheckpoint.filter { msg ->
-                    !msg.isHidden && req.milestoneMessageIds.contains(msg.id.toString())
-                }
-                zoneB += milestones
-
-                val liveAfter = filterAfterCheckpoint(req.liveMessages, req.checkpoint)
-                zoneB += liveAfter.filterNot { it.isHidden }
             } else {
                 zoneB += req.liveMessages.filterNot { it.isHidden }
             }
@@ -305,37 +316,62 @@ object StPromptAssembler {
         }
 
         var historyMarkerFound = false
-        nodes.forEach { node ->
-            when (node) {
-                is Node.Text -> {
-                    if (node.isDynamic) {
-                        zoneC += node.message
-                    } else {
-                        // 所有固定不变的文本条目（无论 SYSTEM、USER 还是 ASSISTANT 角色），
-                        // 始终置于 Zone A 静态前缀区（在历史之前），保证最大化缓存命中
-                        zoneA += node.message
+        if (preset.autoOptimizeOrder) {
+            nodes.forEach { node ->
+                when (node) {
+                    is Node.Text -> {
+                        if (node.isDynamic) {
+                            zoneC += node.message
+                        } else {
+                            // 所有固定不变的文本条目（无论 SYSTEM、USER 还是 ASSISTANT 角色），
+                            // 始终置于 Zone A 静态前缀区（在历史之前），保证最大化缓存命中
+                            zoneA += node.message
+                        }
                     }
-                }
-                is Node.Marker -> {
-                    when (node.identifier) {
-                        "chatHistory" -> {
-                            historyMarkerFound = true
-                        }
-                        "worldInfoAfter" -> {
-                            // 动态触发世界书始终进入 Zone C
-                            resolveMarker(node.identifier, node.prompt, zoneC)
-                        }
-                        else -> {
-                            // 所有静态 marker 始终进入 Zone A
-                            resolveMarker(node.identifier, node.prompt, zoneA)
+                    is Node.Marker -> {
+                        when (node.identifier) {
+                            "chatHistory" -> {
+                                historyMarkerFound = true
+                            }
+                            "worldInfoAfter" -> {
+                                // 动态触发世界书始终进入 Zone C
+                                resolveMarker(node.identifier, node.prompt, zoneC)
+                            }
+                            else -> {
+                                // 所有静态 marker 始终进入 Zone A
+                                resolveMarker(node.identifier, node.prompt, zoneA)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Zone B: 填充历史会话流
-        populateZoneB()
+            // Zone B: 填充历史会话流
+            populateZoneB()
+        } else {
+            // 手动排序 / 禁用自动优化排序：严格按照 prompt_order 中条目的相对位置组装
+            nodes.forEach { node ->
+                val targetList = if (!historyMarkerFound) zoneA else zoneC
+                when (node) {
+                    is Node.Text -> {
+                        targetList += node.message
+                    }
+                    is Node.Marker -> {
+                        if (node.identifier == "chatHistory") {
+                            if (!historyMarkerFound) {
+                                historyMarkerFound = true
+                                populateZoneB()
+                            }
+                        } else {
+                            resolveMarker(node.identifier, node.prompt, targetList)
+                        }
+                    }
+                }
+            }
+            if (!historyMarkerFound) {
+                populateZoneB()
+            }
+        }
 
         if (!historyMarkerFound && req.liveMessages.isNotEmpty()) {
             warnings += "预设没有启用 chatHistory marker，聊天记录已追加到提示词末尾"
@@ -430,6 +466,7 @@ object StPromptAssembler {
         worldInfo: StWorldInfoResult = StWorldInfoResult(),
         checkpoint: ConversationCheckpointEntity? = null,
         milestoneMessageIds: Set<String> = emptySet(),
+        historyAlreadyTrimmed: Boolean = false,
         variables: MutableMap<String, String> = mutableMapOf(),
         globalVariables: MutableMap<String, String> = mutableMapOf(),
         random: Random = Random.Default,
@@ -449,6 +486,7 @@ object StPromptAssembler {
             worldInfo = worldInfo,
             checkpoint = checkpoint,
             milestoneMessageIds = milestoneMessageIds,
+            historyAlreadyTrimmed = historyAlreadyTrimmed,
             variables = variables,
             globalVariables = globalVariables,
             random = random,
@@ -456,6 +494,47 @@ object StPromptAssembler {
             flattenSystemMessages = flattenSystemMessages,
         )
     )
+
+    /**
+     * 在执行 limitContext 与转换器之前，基于完整会话楼层列表裁剪压缩检查点区间。
+     *
+     * 必须在过滤 isHidden 之前调用，否则当 /compact 勾选“自动隐藏已压缩楼层”时，
+     * 预过滤会导致消息列表长度缩小，使 boundaryFloor 下标错位并误删新发送的消息。
+     */
+    fun trimHistoryForCheckpoint(
+        messages: List<UIMessage>,
+        checkpoint: ConversationCheckpointEntity?,
+        milestoneMessageIds: Set<String> = emptySet(),
+    ): List<UIMessage> {
+        if (checkpoint == null) return messages.filterNot { it.isHidden }
+        val boundaryIndex = messages.indexOfLast { it.id.toString() == checkpoint.boundaryNodeId }
+        val endIdx = when {
+            boundaryIndex >= 0 -> boundaryIndex + 1
+            checkpoint.boundaryFloor >= 1 -> checkpoint.boundaryFloor.coerceAtMost(messages.size)
+            else -> 0
+        }
+        val startIdx = (checkpoint.startFloor - 1).coerceIn(0, endIdx)
+        val before = if (startIdx > 0) {
+            messages.subList(0, startIdx).filterNot { it.isHidden }
+        } else {
+            emptyList()
+        }
+        val milestones = if (startIdx < endIdx) {
+            messages.subList(startIdx, endIdx).filter { msg ->
+                milestoneMessageIds.contains(msg.id.toString())
+            }.map { msg ->
+                if (msg.isHidden) msg.copy(isHidden = false) else msg
+            }
+        } else {
+            emptyList()
+        }
+        val after = if (endIdx < messages.size) {
+            messages.subList(endIdx, messages.size).filterNot { it.isHidden }
+        } else {
+            emptyList()
+        }
+        return before + milestones + after
+    }
 
     /** 只解析 prompt_order，不组装；预设详情页用它展示发送顺序。 */
     fun orderedPrompts(preset: StPreset): List<Pair<StPrompt, StPromptOrderEntry>> {
@@ -467,22 +546,61 @@ object StPromptAssembler {
         return entries.mapNotNull { entry -> promptMap[entry.identifier]?.let { it to entry } }
     }
 
-    /** 详情页编辑列表：先按当前顺序列出，再把未挂到 prompt_order 的提示追加到末尾。 */
+    /**
+     * 详情页编辑列表：先按当前顺序列出，再把未挂到 prompt_order 的提示追加到末尾。
+     * 成对的 marker（如 worldInfoBefore 与 worldInfoAfter）合并为一个占位符条目显示。
+     */
     fun editablePrompts(preset: StPreset): List<StPromptRow> {
         val bucket = chooseBucket(preset, mutableListOf())
         val promptMap = preset.prompts.associateBy { it.identifier }
         val entries = bucket.order.ifEmpty {
             preset.prompts.map { StPromptOrderEntry(it.identifier, true) }
         }
+        val pairedMarkers = StPresetMarkers.resolvePairedMarkers(preset.prompts)
+        val secondarySet = pairedMarkers.values.toSet()
+
         val rows = mutableListOf<StPromptRow>()
         val inOrder = mutableSetOf<String>()
-        entries.forEachIndexed { index, entry ->
+        entries.forEach { entry ->
             inOrder += entry.identifier
-            val prompt = promptMap[entry.identifier] ?: return@forEachIndexed
-            rows += StPromptRow(prompt, index, entry.enabled)
+            if (entry.identifier in secondarySet) {
+                return@forEach
+            }
+            val prompt = promptMap[entry.identifier] ?: return@forEach
+            val rowOrderIndex = rows.size
+            val secondaryId = pairedMarkers[entry.identifier]
+            val secondaryPrompt = secondaryId?.let { promptMap[it] }
+            if (secondaryPrompt != null) {
+                inOrder += secondaryPrompt.identifier
+                val mergedPrompt = prompt.copy(
+                    name = StPresetMarkers.mergePairedMarkerName(prompt, secondaryPrompt)
+                )
+                rows += StPromptRow(
+                    prompt = mergedPrompt,
+                    orderIndex = rowOrderIndex,
+                    enabled = entry.enabled,
+                    pairedPrompt = secondaryPrompt,
+                )
+            } else {
+                rows += StPromptRow(prompt, rowOrderIndex, entry.enabled)
+            }
         }
-        preset.prompts.filter { it.identifier !in inOrder }.forEach { prompt ->
-            rows += StPromptRow(prompt, null, false)
+        preset.prompts.filter { it.identifier !in inOrder && it.identifier !in secondarySet }.forEach { prompt ->
+            val secondaryId = pairedMarkers[prompt.identifier]
+            val secondaryPrompt = secondaryId?.let { promptMap[it] }
+            if (secondaryPrompt != null) {
+                val mergedPrompt = prompt.copy(
+                    name = StPresetMarkers.mergePairedMarkerName(prompt, secondaryPrompt)
+                )
+                rows += StPromptRow(
+                    prompt = mergedPrompt,
+                    orderIndex = null,
+                    enabled = false,
+                    pairedPrompt = secondaryPrompt,
+                )
+            } else {
+                rows += StPromptRow(prompt, null, false)
+            }
         }
         return rows
     }

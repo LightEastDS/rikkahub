@@ -61,16 +61,26 @@ object StPresetParser {
         "chatHistory",
     )
 
-    fun parse(rawJson: String, fallbackName: String = "SillyTavern Preset", id: Uuid = Uuid.random()): StPresetParseResult {
+    fun parse(
+        rawJson: String,
+        fallbackName: String = "SillyTavern Preset",
+        id: Uuid = Uuid.random(),
+        autoOptimizeOrder: Boolean = true,
+    ): StPresetParseResult {
         val root = runCatching { json.parseToJsonElement(rawJson.trim().removePrefix("\uFEFF")) }
             .getOrElse { throw StPresetParseException("不是合法的 JSON：${it.message}") }
             .jsonObjectOrNull()
             ?: throw StPresetParseException("预设顶层必须是 JSON 对象")
 
-        return parse(root, fallbackName, id)
+        return parse(root, fallbackName, id, autoOptimizeOrder)
     }
 
-    fun parse(root: JsonObject, fallbackName: String = "SillyTavern Preset", id: Uuid = Uuid.random()): StPresetParseResult {
+    fun parse(
+        root: JsonObject,
+        fallbackName: String = "SillyTavern Preset",
+        id: Uuid = Uuid.random(),
+        autoOptimizeOrder: Boolean = true,
+    ): StPresetParseResult {
         rejectUnsupported(root)
 
         val promptsArray = root["prompts"]?.jsonArrayOrNull()
@@ -103,9 +113,13 @@ object StPresetParser {
         }
 
         val rawPromptOrder = parsePromptOrder(root, warnings)
-        // 自动按 DeepSeek 极速前缀缓存架构对 prompt_order 进行排序优化（静态设定置顶、历史单调递增、动态下沉）
-        val promptOrder = rawPromptOrder.map { bucket ->
-            bucket.copy(order = StPromptAssembler.optimizeOrder(prompts, bucket.order))
+        // 默认按 DeepSeek 极速前缀缓存架构对 prompt_order 进行排序优化；若禁用自动优化则保留原始顺序
+        val promptOrder = if (autoOptimizeOrder) {
+            rawPromptOrder.map { bucket ->
+                bucket.copy(order = StPromptAssembler.optimizeOrder(prompts, bucket.order))
+            }
+        } else {
+            rawPromptOrder
         }
         if (promptOrder.isEmpty()) {
             warnings += "prompt_order 为空，将按 prompts 数组顺序发送"
@@ -164,6 +178,7 @@ object StPresetParser {
             regexScripts = regexScripts,
             characterBook = characterBook,
             warnings = warnings.toList(),
+            autoOptimizeOrder = autoOptimizeOrder,
         )
         val report = StPresetImportReport(
             promptDefinitions = prompts.size,

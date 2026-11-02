@@ -67,6 +67,18 @@ class PromptVM(
         }
     }
 
+    fun reorderStPrompt(id: Uuid, fromIndex: Int, toIndex: Int) {
+        viewModelScope.launch {
+            stPresetRepository.reorderPrompt(id, fromIndex, toIndex)
+        }
+    }
+
+    fun setStPresetAutoOptimizeOrder(id: Uuid, autoOptimize: Boolean) {
+        viewModelScope.launch {
+            stPresetRepository.setAutoOptimizeOrder(id, autoOptimize)
+        }
+    }
+
     fun resetStPreset(id: Uuid) {
         viewModelScope.launch {
             stPresetRepository.resetToDefault(id)

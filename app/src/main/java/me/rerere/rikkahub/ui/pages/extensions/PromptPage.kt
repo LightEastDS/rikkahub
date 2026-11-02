@@ -64,6 +64,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -139,6 +140,7 @@ import me.rerere.ui.components.FormItem
 import me.rerere.ui.components.RikkaConfirmDialog
 import me.rerere.ui.components.Select
 import org.koin.androidx.compose.koinViewModel
+import sh.calvin.reorderable.ReorderableColumn
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
@@ -1443,11 +1445,15 @@ private fun StPresetTab(
             userPersona = userPersona,
             onDismiss = { detailId = null },
             onTogglePreset = { vm.setStPresetEnabled(record.preset.id, it) },
+            onToggleAutoOptimizeOrder = { vm.setStPresetAutoOptimizeOrder(record.preset.id, it) },
             onTogglePrompt = { orderIndex, enabled ->
                 vm.setStPromptEnabled(record.preset.id, orderIndex, enabled)
             },
             onMovePrompt = { orderIndex, delta ->
                 vm.moveStPrompt(record.preset.id, orderIndex, delta)
+            },
+            onReorderPrompt = { fromIndex, toIndex ->
+                vm.reorderStPrompt(record.preset.id, fromIndex, toIndex)
             },
             onResetPreset = { vm.resetStPreset(record.preset.id) },
             onOptimizeOrder = { vm.optimizeStPresetOrder(record.preset.id) },
@@ -1567,8 +1573,10 @@ private fun StPresetEditSheet(
     userPersona: String,
     onDismiss: () -> Unit,
     onTogglePreset: (Boolean) -> Unit,
+    onToggleAutoOptimizeOrder: (Boolean) -> Unit = {},
     onTogglePrompt: (orderIndex: Int, enabled: Boolean) -> Unit,
     onMovePrompt: (orderIndex: Int, delta: Int) -> Unit,
+    onReorderPrompt: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     onResetPreset: () -> Unit,
     onOptimizeOrder: () -> Unit = {},
     onUpdatePrompt: (identifier: String, name: String, role: MessageRole, content: String) -> Unit,
@@ -1662,6 +1670,19 @@ private fun StPresetEditSheet(
                             Switch(
                                 checked = record.enabled,
                                 onCheckedChange = onTogglePreset,
+                            )
+                        }
+                    )
+                }
+
+                item {
+                    FormItem(
+                        label = { Text(stringResource(R.string.prompt_page_st_preset_auto_optimize_order)) },
+                        description = { Text(stringResource(R.string.prompt_page_st_preset_auto_optimize_order_desc)) },
+                        tail = {
+                            Switch(
+                                checked = record.autoOptimizeOrder,
+                                onCheckedChange = onToggleAutoOptimizeOrder,
                             )
                         }
                     )
@@ -1787,22 +1808,42 @@ private fun StPresetEditSheet(
                             text = stringResource(R.string.prompt_page_entries_format, mountedRows.size),
                             style = MaterialTheme.typography.titleSmall
                         )
+                        Text(
+                            text = stringResource(R.string.prompt_page_st_preset_drag_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
 
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-                        mountedRows.fastForEachIndexed { index, row ->
-                            StPromptEditRow(
-                                row = row,
-                                shape = cardGroupItemShape(index, mountedRows.size),
-                                canMoveUp = (row.orderIndex ?: 0) > 0,
-                                canMoveDown = (row.orderIndex ?: 0) < mountedRows.lastIndex,
-                                onToggle = { enabled -> row.orderIndex?.let { onTogglePrompt(it, enabled) } },
-                                onMoveUp = { row.orderIndex?.let { onMovePrompt(it, -1) } },
-                                onMoveDown = { row.orderIndex?.let { onMovePrompt(it, 1) } },
-                                onEdit = { editingRow = row },
-                            )
+                    ReorderableColumn(
+                        list = mountedRows,
+                        onSettle = { fromIndex, toIndex ->
+                            onReorderPrompt(fromIndex, toIndex)
+                        },
+                        verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
+                    ) { index, row, isDragging ->
+                        key(row.prompt.identifier) {
+                            ReorderableItem(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                StPromptEditRow(
+                                    row = row,
+                                    displayIndex = index + 1,
+                                    shape = cardGroupItemShape(index, mountedRows.size),
+                                    canMoveUp = index > 0,
+                                    canMoveDown = index < mountedRows.lastIndex,
+                                    onToggle = { enabled -> row.orderIndex?.let { onTogglePrompt(it, enabled) } },
+                                    onMoveUp = { row.orderIndex?.let { onMovePrompt(it, -1) } },
+                                    onMoveDown = { row.orderIndex?.let { onMovePrompt(it, 1) } },
+                                    onEdit = { editingRow = row },
+                                    modifier = longPressReorder(
+                                        isDragging = isDragging,
+                                        enabled = mountedRows.size > 1,
+                                    ),
+                                )
+                            }
                         }
                     }
                 }
@@ -1988,6 +2029,8 @@ private fun StPromptEditRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+    displayIndex: Int? = row.orderIndex?.plus(1),
 ) {
     val prompt = row.prompt
     val protected = prompt.marker && StPresetMarkers.isProtected(prompt.identifier)
@@ -1997,7 +2040,7 @@ private fun StPromptEditRow(
 
     Surface(
         onClick = onEdit,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
@@ -2013,7 +2056,7 @@ private fun StPromptEditRow(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = "${row.orderIndex?.plus(1) ?: "—"}. ${prompt.name.ifBlank { prompt.identifier }}",
+                    text = "${displayIndex ?: "—"}. ${prompt.name.ifBlank { prompt.identifier }}",
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2029,6 +2072,9 @@ private fun StPromptEditRow(
                         Tag(type = TagType.INFO) {
                             Text(stringResource(R.string.prompt_page_st_preset_in_chat_depth, prompt.injectionDepth))
                         }
+                    }
+                    if (row.pairedPrompt != null) {
+                        Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_paired_marker)) }
                     }
                     if (protected) {
                         Tag(type = TagType.INFO) { Text(stringResource(R.string.prompt_page_st_preset_protected)) }

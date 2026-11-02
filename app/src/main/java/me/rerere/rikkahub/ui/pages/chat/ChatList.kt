@@ -17,6 +17,7 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -38,6 +39,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -73,6 +75,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -962,17 +965,25 @@ private fun CompactedSummaryCard(
     onToggleExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var isSummaryExpanded by rememberSaveable(checkpoint.id) { mutableStateOf(false) }
+    val collapsedPreview = remember(checkpoint.summaryContent) {
+        buildCollapsedSummaryPreview(checkpoint.summaryContent)
+    }
+    val isCollapsible = collapsedPreview != null
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 6.dp),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = containerColor,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .animateContentSize()
                 .padding(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1009,13 +1020,95 @@ private fun CompactedSummaryCard(
                 )
             }
 
-            // 居中展示压缩得到的摘要正文（Markdown 格式，不显示字数、楼层、tokens 等信息）
-            SelectionContainer {
-                MarkdownBlock(
-                    content = checkpoint.summaryContent,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            // 居中展示压缩得到的摘要正文（默认仅显示前几行，点击可展开全部内容）
+            if (!isSummaryExpanded && collapsedPreview != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 108.dp)
+                        .clipToBounds()
+                        .clickable { isSummaryExpanded = true },
+                ) {
+                    MarkdownBlock(
+                        content = collapsedPreview,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(32.dp)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, containerColor)
+                                )
+                            )
+                    )
+                }
+            } else {
+                SelectionContainer {
+                    MarkdownBlock(
+                        content = checkpoint.summaryContent,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            if (isCollapsible) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { isSummaryExpanded = !isSummaryExpanded }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        imageVector = if (isSummaryExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = if (isSummaryExpanded) "收起压缩内容" else "展开压缩内容",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
+}
+
+private fun buildCollapsedSummaryPreview(
+    summary: String,
+    maxNonBlankLines: Int = 4,
+    maxChars: Int = 200,
+): String? {
+    val trimmed = summary.trim()
+    if (trimmed.isEmpty()) return null
+    val lines = trimmed.lines()
+    val nonBlankCount = lines.count { it.isNotBlank() }
+    if (nonBlankCount <= maxNonBlankLines && trimmed.length <= maxChars) {
+        return null
+    }
+    val previewLines = mutableListOf<String>()
+    var seenNonBlank = 0
+    var charCount = 0
+    for (line in lines) {
+        if (line.isNotBlank()) {
+            seenNonBlank++
+        }
+        val remaining = maxChars - charCount
+        if (remaining <= 0) break
+        if (line.length > remaining) {
+            previewLines += line.take(remaining).trimEnd() + "…"
+            break
+        } else {
+            previewLines += line
+            charCount += line.length + 1
+        }
+        if (seenNonBlank >= maxNonBlankLines) break
+    }
+    return previewLines.joinToString("\n").trim()
 }

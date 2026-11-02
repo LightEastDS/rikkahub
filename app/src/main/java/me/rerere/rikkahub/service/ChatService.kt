@@ -1496,7 +1496,7 @@ class ChatService(
         }
 
         val boundaryNode = candidateNodes.last()
-        val boundaryNodeId = boundaryNode.id.toString()
+        val boundaryNodeId = boundaryNode.currentMessage.id.toString()
 
         val settings = settingsStore.awaitLoaded()
         val provider = model.findProvider(settings.providers)
