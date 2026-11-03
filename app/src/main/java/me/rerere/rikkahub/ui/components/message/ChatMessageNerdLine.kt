@@ -71,7 +71,9 @@ fun ChatMessageNerdLine(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
     nodeIndex: Int = -1,
+    loading: Boolean = false,
 ) {
+    if (loading) return
     val settings = LocalSettings.current
     val usage = message.usage
     val showTokenStats = settings.displaySetting.showTokenUsage && usage != null

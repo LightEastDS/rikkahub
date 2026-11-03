@@ -1851,4 +1851,26 @@
   <string name="setting_model_page_memory_model">Memory Consolidation Model</string>
   <string name="setting_model_page_memory_model_desc">Model used to organize conversations into long-term memory in the background; uses the fast model when not set</string>
   <string name="setting_model_page_memory_model_follow_fast">Same as fast model</string>
+  <string name="log_page_download_logs">Download HTTP logs</string>
+  <string name="log_page_download_empty">No request logs to download</string>
+  <string name="log_page_download_success">Logs saved successfully</string>
+  <string name="log_page_download_failed">Failed to save logs</string>
+  <string name="prompt_page_st_preset_add_prompt">Add prompt entry</string>
+  <string name="prompt_page_st_preset_delete_prompt">Delete prompt entry</string>
+  <string name="prompt_page_st_preset_delete_prompt_confirm">Are you sure you want to delete prompt \"%1$s\"?</string>
+  <string name="prompt_page_st_preset_regex_add">Add regex script</string>
+  <string name="prompt_page_st_preset_regex_edit">Edit regex script</string>
+  <string name="prompt_page_st_preset_regex_delete">Delete regex script</string>
+  <string name="prompt_page_st_preset_regex_delete_confirm">Are you sure you want to delete regex script \"%1$s\"?</string>
+  <string name="prompt_page_st_preset_regex_find">Find Regex</string>
+  <string name="prompt_page_st_preset_regex_replace">Replace with</string>
+  <string name="prompt_page_st_preset_regex_placement">Placement</string>
+  <string name="prompt_page_st_preset_regex_placement_user">User Input (1)</string>
+  <string name="prompt_page_st_preset_regex_placement_ai">AI Output (2)</string>
+  <string name="prompt_page_st_preset_regex_markdown_only">Markdown only (display layer)</string>
+  <string name="prompt_page_st_preset_regex_prompt_only">Prompt only (request assembly)</string>
+  <string name="prompt_page_st_preset_regex_substitute">Substitute regex macros</string>
+  <string name="prompt_page_st_preset_regex_run_on_edit">Run on edit</string>
+  <string name="prompt_page_st_preset_regex_min_depth">Min depth</string>
+  <string name="prompt_page_st_preset_regex_max_depth">Max depth</string>
 </resources>

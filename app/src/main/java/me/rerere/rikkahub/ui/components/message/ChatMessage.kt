@@ -246,7 +246,8 @@ fun ChatMessage(
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(
                 message = message,
-                nodeIndex = nodeIndex
+                nodeIndex = nodeIndex,
+                loading = loading,
             )
         }
 

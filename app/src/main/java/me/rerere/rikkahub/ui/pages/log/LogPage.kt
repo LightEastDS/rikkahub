@@ -2,11 +2,17 @@ package me.rerere.rikkahub.ui.pages.log
 
 import android.content.ClipData
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ClipEntry
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Download01
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -58,9 +64,35 @@ import java.util.Locale
 
 @Composable
 fun LogPage() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var logs by remember { mutableStateOf(Logging.getRecentLogs()) }
     var requestLoggingEnabled by remember { mutableStateOf(Logging.isRequestLoggingEnabled()) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    var pendingExportContent by remember { mutableStateOf<String?>(null) }
+    val exportAllLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val content = pendingExportContent ?: return@rememberLauncherForActivityResult
+        pendingExportContent = null
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                    }
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, context.getString(R.string.log_page_download_success), Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "${context.getString(R.string.log_page_download_failed)}: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -68,6 +100,23 @@ fun LogPage() {
                 title = { Text("Logs") },
                 navigationIcon = { BackButton() },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            val requestLogs = Logging.getRequestLogs()
+                            if (requestLogs.isEmpty()) {
+                                Toast.makeText(context, context.getString(R.string.log_page_download_empty), Toast.LENGTH_SHORT).show()
+                                return@IconButton
+                            }
+                            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                            pendingExportContent = JsonInstantPretty.encodeToString(
+                                kotlinx.serialization.builtins.ListSerializer(LogEntry.RequestLog.serializer()),
+                                requestLogs
+                            )
+                            exportAllLauncher.launch("rikkahub_http_logs_$timestamp.json")
+                        }
+                    ) {
+                        Icon(HugeIcons.Download01, contentDescription = stringResource(R.string.log_page_download_logs))
+                    }
                     IconButton(
                         onClick = {
                             Logging.clear()
@@ -261,6 +310,30 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    var pendingSingleExportContent by remember { mutableStateOf<String?>(null) }
+    val exportSingleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val content = pendingSingleExportContent ?: return@rememberLauncherForActivityResult
+        pendingSingleExportContent = null
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                    }
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, context.getString(R.string.log_page_download_success), Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "${context.getString(R.string.log_page_download_failed)}: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
     SelectionContainer {
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
@@ -268,11 +341,30 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text(
-                    text = "Request Details",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Request Details",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(
+                        onClick = {
+                            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(log.timestamp))
+                            pendingSingleExportContent = JsonInstantPretty.encodeToString(LogEntry.RequestLog.serializer(), log)
+                            val method = log.method.lowercase()
+                            exportSingleLauncher.launch("http_${method}_${timestamp}.json")
+                        }
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Download01,
+                            contentDescription = stringResource(R.string.log_page_download_logs)
+                        )
+                    }
+                }
             }
 
             item {

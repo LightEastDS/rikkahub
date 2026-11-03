@@ -20,6 +20,7 @@ import me.rerere.rikkahub.data.stpreset.StPresetParseResult
 import me.rerere.rikkahub.data.stpreset.StPresetParser
 import me.rerere.rikkahub.data.stpreset.StPromptOrderBucket
 import me.rerere.rikkahub.data.stpreset.StPromptOrderEntry
+import me.rerere.rikkahub.data.stpreset.StRegexScript
 import me.rerere.rikkahub.utils.JsonInstant
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
@@ -210,6 +211,131 @@ class StPresetRepository(
             name = name,
             content = content,
             role = role,
+        )
+        if (updatedRaw != entity.rawJson) {
+            dao.updateRawJson(key, updatedRaw)
+            cache.remove(key)
+        }
+    }
+
+    /** 新增一条提示条目到预设副本中。 */
+    suspend fun addPrompt(
+        id: Uuid,
+        name: String,
+        content: String,
+        role: MessageRole,
+    ) {
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val newIdentifier = "custom_${java.util.UUID.randomUUID().toString().replace("-", "").take(8)}"
+        val updatedRaw = StPresetDocumentEditor.addPrompt(
+            rawJson = entity.rawJson,
+            name = name,
+            content = content,
+            role = role,
+            identifier = newIdentifier,
+        )
+        if (entity.orderJson.isNotBlank()) {
+            val config = decodeOrderConfig(entity.orderJson)
+            if (config.order.isNotEmpty()) {
+                val updatedOrder = config.order + StPromptOrderEntry(newIdentifier, enabled = true)
+                saveOrder(id, updatedOrder, autoOptimizeOrder = config.autoOptimizeOrder)
+            }
+        }
+        if (updatedRaw != entity.rawJson) {
+            dao.updateRawJson(key, updatedRaw)
+            cache.remove(key)
+        }
+    }
+
+    /** 删除预设副本里的指定条目（非受保护核心 marker）。 */
+    suspend fun deletePrompt(
+        id: Uuid,
+        identifier: String,
+    ) {
+        if (StPresetMarkers.isProtected(identifier)) return
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val updatedRaw = StPresetDocumentEditor.deletePrompt(
+            rawJson = entity.rawJson,
+            identifier = identifier,
+        )
+        if (entity.orderJson.isNotBlank()) {
+            val config = decodeOrderConfig(entity.orderJson)
+            if (config.order.isNotEmpty()) {
+                val updatedOrder = config.order.filter { it.identifier != identifier }
+                saveOrder(id, updatedOrder, autoOptimizeOrder = config.autoOptimizeOrder)
+            }
+        }
+        if (updatedRaw != entity.rawJson) {
+            dao.updateRawJson(key, updatedRaw)
+            cache.remove(key)
+        }
+    }
+
+    /** 新增正则脚本。 */
+    suspend fun addRegexScript(
+        id: Uuid,
+        script: StRegexScript,
+    ) {
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val updatedRaw = StPresetDocumentEditor.addRegexScript(
+            rawJson = entity.rawJson,
+            script = script,
+        )
+        if (updatedRaw != entity.rawJson) {
+            dao.updateRawJson(key, updatedRaw)
+            cache.remove(key)
+        }
+    }
+
+    /** 修改正则脚本。 */
+    suspend fun updateRegexScript(
+        id: Uuid,
+        script: StRegexScript,
+    ) {
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val updatedRaw = StPresetDocumentEditor.updateRegexScript(
+            rawJson = entity.rawJson,
+            script = script,
+        )
+        if (updatedRaw != entity.rawJson) {
+            dao.updateRawJson(key, updatedRaw)
+            cache.remove(key)
+        }
+    }
+
+    /** 删除正则脚本。 */
+    suspend fun deleteRegexScript(
+        id: Uuid,
+        scriptId: String,
+    ) {
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val updatedRaw = StPresetDocumentEditor.deleteRegexScript(
+            rawJson = entity.rawJson,
+            scriptId = scriptId,
+        )
+        if (updatedRaw != entity.rawJson) {
+            dao.updateRawJson(key, updatedRaw)
+            cache.remove(key)
+        }
+    }
+
+    /** 启停正则脚本。 */
+    suspend fun toggleRegexScript(
+        id: Uuid,
+        scriptId: String,
+        disabled: Boolean,
+    ) {
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val updatedRaw = StPresetDocumentEditor.toggleRegexScript(
+            rawJson = entity.rawJson,
+            scriptId = scriptId,
+            disabled = disabled,
         )
         if (updatedRaw != entity.rawJson) {
             dao.updateRawJson(key, updatedRaw)

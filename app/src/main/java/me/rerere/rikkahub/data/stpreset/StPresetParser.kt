@@ -314,8 +314,10 @@ object StPresetParser {
     )
 
     private fun parseRegexScripts(root: JsonObject, warnings: MutableList<String>): List<StRegexScript> {
-        val extensions = root["extensions"] as? JsonObject ?: return emptyList()
-        val scripts = extensions["regex_scripts"].jsonArrayOrNull() ?: return emptyList()
+        val extensions = root["extensions"] as? JsonObject
+        val scripts = extensions?.get("regex_scripts").jsonArrayOrNull()
+            ?: root["regex_scripts"].jsonArrayOrNull()
+            ?: return emptyList()
         return scripts.mapNotNull { element ->
             val obj = element as? JsonObject ?: return@mapNotNull null
             val findRegex = obj.string("findRegex").orEmpty()

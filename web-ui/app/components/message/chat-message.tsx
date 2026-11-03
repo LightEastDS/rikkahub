@@ -511,11 +511,14 @@ const ChatMessageNerdLineRow = React.memo(({
   message,
   alignRight,
   messageIndex,
+  loading,
 }: {
   message: MessageDto;
   alignRight: boolean;
   messageIndex?: number;
+  loading?: boolean;
 }) => {
+  if (loading) return null;
   const { t } = useTranslation("message");
   const displaySetting = useSettingsStore((state) => state.settings?.displaySetting);
 
@@ -719,7 +722,12 @@ export const ChatMessage = React.memo(({
 
       <ChatMessageAnnotationsRow annotations={message.annotations} alignRight={isUser} />
 
-      <ChatMessageNerdLineRow message={message} alignRight={isUser} messageIndex={messageIndex} />
+      <ChatMessageNerdLineRow
+        message={message}
+        alignRight={isUser}
+        messageIndex={messageIndex}
+        loading={loading}
+      />
     </div>
   );
 });

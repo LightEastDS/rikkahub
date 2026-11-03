@@ -1853,4 +1853,26 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_model_page_memory_model">记忆整理模型</string>
   <string name="setting_model_page_memory_model_desc">用于在后台将对话整理为长期记忆的模型；未设置时使用快速模型</string>
   <string name="setting_model_page_memory_model_follow_fast">跟随快速模型</string>
+  <string name="log_page_download_logs">下载 HTTP 日志</string>
+  <string name="log_page_download_empty">暂无可下载的请求日志</string>
+  <string name="log_page_download_success">日志已成功保存</string>
+  <string name="log_page_download_failed">日志保存失败</string>
+  <string name="prompt_page_st_preset_add_prompt">新增提示词条目</string>
+  <string name="prompt_page_st_preset_delete_prompt">删除条目</string>
+  <string name="prompt_page_st_preset_delete_prompt_confirm">确定要删除提示词条目「%1$s」吗？</string>
+  <string name="prompt_page_st_preset_regex_add">新增正则脚本</string>
+  <string name="prompt_page_st_preset_regex_edit">编辑正则脚本</string>
+  <string name="prompt_page_st_preset_regex_delete">删除正则脚本</string>
+  <string name="prompt_page_st_preset_regex_delete_confirm">确定要删除正则脚本「%1$s」吗？</string>
+  <string name="prompt_page_st_preset_regex_find">查找正则表达式</string>
+  <string name="prompt_page_st_preset_regex_replace">替换为</string>
+  <string name="prompt_page_st_preset_regex_placement">作用目标</string>
+  <string name="prompt_page_st_preset_regex_placement_user">用户输入 (1)</string>
+  <string name="prompt_page_st_preset_regex_placement_ai">AI 输出 (2)</string>
+  <string name="prompt_page_st_preset_regex_markdown_only">仅显示层 (MarkdownOnly)</string>
+  <string name="prompt_page_st_preset_regex_prompt_only">仅提示词 (PromptOnly)</string>
+  <string name="prompt_page_st_preset_regex_substitute">替换宏变量 (SubstituteRegex)</string>
+  <string name="prompt_page_st_preset_regex_run_on_edit">编辑时运行</string>
+  <string name="prompt_page_st_preset_regex_min_depth">最小深度</string>
+  <string name="prompt_page_st_preset_regex_max_depth">最大深度</string>
 </resources>

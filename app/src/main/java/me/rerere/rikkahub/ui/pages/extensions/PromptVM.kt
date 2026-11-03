@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.repository.StPresetRepository
 import me.rerere.rikkahub.data.repository.StPresetRecord
 import me.rerere.rikkahub.data.repository.StVariableRepository
 import me.rerere.rikkahub.data.stpreset.StPresetImportReport
+import me.rerere.rikkahub.data.stpreset.StRegexScript
 import kotlin.uuid.Uuid
 
 class PromptVM(
@@ -100,6 +101,63 @@ class PromptVM(
     ) {
         viewModelScope.launch {
             stPresetRepository.updatePrompt(id, identifier, name, content, role)
+        }
+    }
+
+    fun addStPrompt(
+        id: Uuid,
+        name: String,
+        content: String,
+        role: MessageRole,
+    ) {
+        viewModelScope.launch {
+            stPresetRepository.addPrompt(id, name, content, role)
+        }
+    }
+
+    fun deleteStPrompt(
+        id: Uuid,
+        identifier: String,
+    ) {
+        viewModelScope.launch {
+            stPresetRepository.deletePrompt(id, identifier)
+        }
+    }
+
+    fun addStRegexScript(
+        id: Uuid,
+        script: StRegexScript,
+    ) {
+        viewModelScope.launch {
+            stPresetRepository.addRegexScript(id, script)
+        }
+    }
+
+    fun updateStRegexScript(
+        id: Uuid,
+        script: StRegexScript,
+    ) {
+        viewModelScope.launch {
+            stPresetRepository.updateRegexScript(id, script)
+        }
+    }
+
+    fun deleteStRegexScript(
+        id: Uuid,
+        scriptId: String,
+    ) {
+        viewModelScope.launch {
+            stPresetRepository.deleteRegexScript(id, scriptId)
+        }
+    }
+
+    fun toggleStRegexScript(
+        id: Uuid,
+        scriptId: String,
+        disabled: Boolean,
+    ) {
+        viewModelScope.launch {
+            stPresetRepository.toggleRegexScript(id, scriptId, disabled)
         }
     }
 

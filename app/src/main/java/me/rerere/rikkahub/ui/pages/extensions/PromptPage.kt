@@ -33,11 +33,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
+import java.util.UUID
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Sorting01
@@ -79,6 +82,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -114,11 +118,14 @@ import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.repository.StPresetRecord
 import me.rerere.rikkahub.data.stpreset.StMacroResolver
+import me.rerere.rikkahub.data.stpreset.StPrompt
 import me.rerere.rikkahub.data.stpreset.StPromptAssembler
 import me.rerere.rikkahub.data.stpreset.StPromptRow
 import me.rerere.rikkahub.data.stpreset.StPromptZone
 import me.rerere.rikkahub.data.stpreset.StPresetMarkers
 import me.rerere.rikkahub.data.stpreset.StPresetParser
+import me.rerere.rikkahub.data.stpreset.StRegexScript
+import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroupIcon
@@ -1461,6 +1468,24 @@ private fun StPresetTab(
             onUpdatePrompt = { identifier, name, role, content ->
                 vm.updateStPrompt(record.preset.id, identifier, name, content, role)
             },
+            onAddPrompt = { name, role, content ->
+                vm.addStPrompt(record.preset.id, name, content, role)
+            },
+            onDeletePrompt = { identifier ->
+                vm.deleteStPrompt(record.preset.id, identifier)
+            },
+            onAddRegexScript = { script ->
+                vm.addStRegexScript(record.preset.id, script)
+            },
+            onUpdateRegexScript = { script ->
+                vm.updateStRegexScript(record.preset.id, script)
+            },
+            onDeleteRegexScript = { scriptId ->
+                vm.deleteStRegexScript(record.preset.id, scriptId)
+            },
+            onToggleRegexScript = { scriptId, disabled ->
+                vm.toggleStRegexScript(record.preset.id, scriptId, disabled)
+            },
             onLoadVariables = { vm.getVariables(it) },
             onSaveVariables = { scopeId, vars -> vm.saveVariables(scopeId, vars)
             },
@@ -1581,6 +1606,12 @@ private fun StPresetEditSheet(
     onResetPreset: () -> Unit,
     onOptimizeOrder: () -> Unit = {},
     onUpdatePrompt: (identifier: String, name: String, role: MessageRole, content: String) -> Unit,
+    onAddPrompt: (name: String, role: MessageRole, content: String) -> Unit = { _, _, _ -> },
+    onDeletePrompt: (identifier: String) -> Unit = {},
+    onAddRegexScript: (StRegexScript) -> Unit = {},
+    onUpdateRegexScript: (StRegexScript) -> Unit = {},
+    onDeleteRegexScript: (String) -> Unit = {},
+    onToggleRegexScript: (String, Boolean) -> Unit = { _, _ -> },
     onLoadVariables: suspend (String) -> Map<String, String> = { emptyMap() },
     onSaveVariables: (String, Map<String, String>) -> Unit = { _, _ -> },
 ) {
@@ -1593,8 +1624,20 @@ private fun StPresetEditSheet(
     val rows = remember(preset) { StPromptAssembler.editablePrompts(preset) }
     val mountedRows = rows.filter { it.orderIndex != null }
     val detachedRows = rows.filter { it.orderIndex == null }
+    val lazyListState = rememberLazyListState()
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val fromPos = mountedRows.indexOfFirst { it.prompt.identifier == from.key }
+        val toPos = mountedRows.indexOfFirst { it.prompt.identifier == to.key }
+        if (fromPos >= 0 && toPos >= 0 && fromPos != toPos) {
+            onReorderPrompt(fromPos, toPos)
+        }
+    }
     var showInspect by remember { mutableStateOf(false) }
     var editingRow by remember { mutableStateOf<StPromptRow?>(null) }
+    var showAddPromptDialog by remember { mutableStateOf(false) }
+    var promptToDelete by remember { mutableStateOf<StPrompt?>(null) }
+    var editingRegexScript by remember { mutableStateOf<StRegexScript?>(null) }
+    var deletingRegexScript by remember { mutableStateOf<StRegexScript?>(null) }
     val declaredVariables = remember(preset) {
         StMacroResolver.preScanVariables(preset)
     }
@@ -1632,6 +1675,7 @@ private fun StPresetEditSheet(
             )
 
             LazyColumn(
+                state = lazyListState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -1809,10 +1853,24 @@ private fun StPresetEditSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = stringResource(R.string.prompt_page_entries_format, mountedRows.size),
-                                style = MaterialTheme.typography.titleSmall
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.prompt_page_entries_format, mountedRows.size),
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                IconButton(
+                                    onClick = { showAddPromptDialog = true },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        HugeIcons.Add01,
+                                        contentDescription = stringResource(R.string.prompt_page_st_preset_add_prompt)
+                                    )
+                                }
+                            }
                             Text(
                                 text = stringResource(R.string.prompt_page_st_preset_drag_hint),
                                 style = MaterialTheme.typography.bodySmall,
@@ -1841,35 +1899,34 @@ private fun StPresetEditSheet(
                     }
                 }
 
-                item {
-                    ReorderableColumn(
-                        list = mountedRows,
-                        onSettle = { fromIndex, toIndex ->
-                            onReorderPrompt(fromIndex, toIndex)
-                        },
-                        verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-                    ) { index, row, isDragging ->
-                        key(row.prompt.identifier) {
-                            ReorderableItem(
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                StPromptEditRow(
-                                    row = row,
-                                    displayIndex = index + 1,
-                                    shape = cardGroupItemShape(index, mountedRows.size),
-                                    canMoveUp = index > 0,
-                                    canMoveDown = index < mountedRows.lastIndex,
-                                    onToggle = { enabled -> row.orderIndex?.let { onTogglePrompt(it, enabled) } },
-                                    onMoveUp = { row.orderIndex?.let { onMovePrompt(it, -1) } },
-                                    onMoveDown = { row.orderIndex?.let { onMovePrompt(it, 1) } },
-                                    onEdit = { editingRow = row },
-                                    modifier = longPressReorder(
-                                        isDragging = isDragging,
-                                        enabled = mountedRows.size > 1,
-                                    ),
-                                )
-                            }
-                        }
+                items(
+                    items = mountedRows,
+                    key = { it.prompt.identifier }
+                ) { row ->
+                    val index = mountedRows.indexOf(row)
+                    ReorderableItem(
+                        state = reorderableState,
+                        key = row.prompt.identifier,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { isDragging ->
+                        StPromptEditRow(
+                            row = row,
+                            displayIndex = index + 1,
+                            shape = cardGroupItemShape(index, mountedRows.size),
+                            canMoveUp = index > 0,
+                            canMoveDown = index < mountedRows.lastIndex,
+                            onToggle = { enabled -> row.orderIndex?.let { onTogglePrompt(it, enabled) } },
+                            onMoveUp = { row.orderIndex?.let { onMovePrompt(it, -1) } },
+                            onMoveDown = { row.orderIndex?.let { onMovePrompt(it, 1) } },
+                            onEdit = { editingRow = row },
+                            onDelete = if (!StPresetMarkers.isProtected(row.prompt.identifier) && !row.prompt.marker) {
+                                { promptToDelete = row.prompt }
+                            } else null,
+                            modifier = longPressReorder(
+                                isDragging = isDragging,
+                                enabled = mountedRows.size > 1,
+                            ),
+                        )
                     }
                 }
 
@@ -1882,70 +1939,129 @@ private fun StPresetEditSheet(
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-                            detachedRows.fastForEachIndexed { index, row ->
-                                StPromptEditRow(
-                                    row = row,
-                                    shape = cardGroupItemShape(index, detachedRows.size),
-                                    canMoveUp = false,
-                                    canMoveDown = false,
-                                    onToggle = {},
-                                    onMoveUp = {},
-                                    onMoveDown = {},
-                                    onEdit = { editingRow = row },
-                                )
-                            }
+                    items(items = detachedRows, key = { "detached_${it.prompt.identifier}" }) { row ->
+                        val index = detachedRows.indexOf(row)
+                        StPromptEditRow(
+                            row = row,
+                            shape = cardGroupItemShape(index, detachedRows.size),
+                            canMoveUp = false,
+                            canMoveDown = false,
+                            onToggle = {},
+                            onMoveUp = {},
+                            onMoveDown = {},
+                            onEdit = { editingRow = row },
+                            onDelete = if (!StPresetMarkers.isProtected(row.prompt.identifier) && !row.prompt.marker) {
+                                { promptToDelete = row.prompt }
+                            } else null,
+                        )
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.prompt_page_st_preset_regex) + " (${preset.regexScripts.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        IconButton(
+                            onClick = { editingRegexScript = StRegexScript() },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(HugeIcons.Add01, contentDescription = stringResource(R.string.prompt_page_st_preset_regex_add))
                         }
                     }
                 }
 
-                if (preset.regexScripts.isNotEmpty()) {
+                if (preset.regexScripts.isEmpty()) {
                     item {
                         Text(
-                            text = stringResource(R.string.prompt_page_st_preset_regex),
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.padding(top = 8.dp),
+                            text = "暂无正则脚本，点击右上角「+」可新增",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-                            preset.regexScripts.fastForEachIndexed { index, script ->
-                                Surface(
-                                    shape = cardGroupItemShape(index, preset.regexScripts.size),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    modifier = Modifier.fillMaxWidth(),
+                } else {
+                    items(
+                        items = preset.regexScripts,
+                        key = { "regex_${it.id.ifBlank { it.name + it.findRegex }}" }
+                    ) { script ->
+                        val index = preset.regexScripts.indexOf(script)
+                        Surface(
+                            shape = cardGroupItemShape(index, preset.regexScripts.size),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { editingRegexScript = script }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    Text(
+                                        text = script.name.ifBlank { script.findRegex.take(40) },
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = "/${script.findRegex}/ → \"${script.replaceString}\"",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = JetbrainsMono,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
                                     ) {
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text(
-                                                text = script.name.ifBlank { script.findRegex.take(40) },
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Tag(type = TagType.DEFAULT) {
-                                                    Text(if (script.isDisplayScript) "display" else "prompt")
-                                                }
-                                                if (script.disabled) {
-                                                    Tag(type = TagType.WARNING) {
-                                                        Text(stringResource(R.string.prompt_page_disabled))
-                                                    }
-                                                }
+                                        if (script.isDisplayScript) {
+                                            Tag(type = TagType.DEFAULT) { Text("display") }
+                                        }
+                                        if (script.isPromptScript) {
+                                            Tag(type = TagType.DEFAULT) { Text("prompt") }
+                                        }
+                                        if (1 in script.placement) {
+                                            Tag(type = TagType.INFO) { Text("User (1)") }
+                                        }
+                                        if (2 in script.placement) {
+                                            Tag(type = TagType.INFO) { Text("AI (2)") }
+                                        }
+                                        if (script.disabled) {
+                                            Tag(type = TagType.WARNING) {
+                                                Text(stringResource(R.string.prompt_page_disabled))
                                             }
                                         }
                                     }
                                 }
+                                Switch(
+                                    checked = !script.disabled,
+                                    onCheckedChange = { onToggleRegexScript(script.id, !it) }
+                                )
+                                ItemActionMenu(
+                                    actions = listOf(
+                                        ItemAction(
+                                            text = stringResource(R.string.prompt_page_st_preset_regex_edit),
+                                            icon = HugeIcons.Edit01,
+                                            onClick = { editingRegexScript = script }
+                                        ),
+                                        ItemAction(
+                                            text = stringResource(R.string.prompt_page_st_preset_regex_delete),
+                                            icon = HugeIcons.Delete01,
+                                            onClick = { deletingRegexScript = script }
+                                        ),
+                                    )
+                                )
                             }
                         }
                     }
@@ -2083,7 +2199,76 @@ private fun StPresetEditSheet(
                 onUpdatePrompt(row.prompt.identifier, name, role, content)
                 editingRow = null
             },
+            onDelete = if (!StPresetMarkers.isProtected(row.prompt.identifier) && !row.prompt.marker) {
+                {
+                    promptToDelete = row.prompt
+                    editingRow = null
+                }
+            } else null,
         )
+    }
+
+    if (showAddPromptDialog) {
+        StPromptCreateDialog(
+            onDismiss = { showAddPromptDialog = false },
+            onSave = { name, role, content ->
+                onAddPrompt(name, role, content)
+                showAddPromptDialog = false
+            }
+        )
+    }
+
+    promptToDelete?.let { prompt ->
+        RikkaConfirmDialog(
+            show = true,
+            title = stringResource(R.string.prompt_page_st_preset_delete_prompt),
+            confirmText = stringResource(R.string.delete),
+            dismissText = stringResource(R.string.cancel),
+            onConfirm = {
+                onDeletePrompt(prompt.identifier)
+                promptToDelete = null
+            },
+            onDismiss = { promptToDelete = null }
+        ) {
+            Text(stringResource(R.string.prompt_page_st_preset_delete_prompt_confirm, prompt.name.ifBlank { prompt.identifier }))
+        }
+    }
+
+    editingRegexScript?.let { script ->
+        StRegexEditDialog(
+            script = script,
+            onDismiss = { editingRegexScript = null },
+            onSave = { updated ->
+                if (script.id.isBlank()) {
+                    onAddRegexScript(updated)
+                } else {
+                    onUpdateRegexScript(updated)
+                }
+                editingRegexScript = null
+            },
+            onDelete = if (script.id.isNotBlank()) {
+                {
+                    deletingRegexScript = script
+                    editingRegexScript = null
+                }
+            } else null,
+        )
+    }
+
+    deletingRegexScript?.let { script ->
+        RikkaConfirmDialog(
+            show = true,
+            title = stringResource(R.string.prompt_page_st_preset_regex_delete),
+            confirmText = stringResource(R.string.delete),
+            dismissText = stringResource(R.string.cancel),
+            onConfirm = {
+                onDeleteRegexScript(script.id)
+                deletingRegexScript = null
+            },
+            onDismiss = { deletingRegexScript = null }
+        ) {
+            Text(stringResource(R.string.prompt_page_st_preset_regex_delete_confirm, script.name.ifBlank { script.findRegex }))
+        }
     }
 }
 
@@ -2099,6 +2284,7 @@ private fun StPromptEditRow(
     onEdit: () -> Unit,
     modifier: Modifier = Modifier,
     displayIndex: Int? = row.orderIndex?.plus(1),
+    onDelete: (() -> Unit)? = null,
 ) {
     val prompt = row.prompt
     val protected = prompt.marker && StPresetMarkers.isProtected(prompt.identifier)
@@ -2193,6 +2379,16 @@ private fun StPromptEditRow(
                             )
                         )
                     }
+                    if (onDelete != null) {
+                        add(
+                            ItemAction(
+                                text = stringResource(R.string.prompt_page_delete),
+                                icon = HugeIcons.Delete01,
+                                destructive = true,
+                                onClick = onDelete,
+                            )
+                        )
+                    }
                 }
             )
         }
@@ -2204,6 +2400,7 @@ private fun StPromptEditDialog(
     row: StPromptRow,
     onDismiss: () -> Unit,
     onSave: (name: String, role: MessageRole, content: String) -> Unit,
+    onDelete: (() -> Unit)? = null,
 ) {
     val prompt = row.prompt
     var name by remember(prompt.identifier) { mutableStateOf(prompt.name) }
@@ -2265,10 +2462,287 @@ private fun StPromptEditDialog(
             }
         },
         dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onDelete != null) {
+                    TextButton(
+                        onClick = onDelete,
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text(stringResource(R.string.prompt_page_delete))
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.prompt_page_cancel))
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun StPromptCreateDialog(
+    onDismiss: () -> Unit,
+    onSave: (name: String, role: MessageRole, content: String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var role by remember { mutableStateOf(MessageRole.SYSTEM) }
+    var content by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.prompt_page_st_preset_add_prompt)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.prompt_page_name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Text(
+                    text = stringResource(R.string.prompt_page_injection_role),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                ConnectedChoiceButtons(
+                    options = listOf(MessageRole.SYSTEM, MessageRole.USER, MessageRole.ASSISTANT),
+                    selected = role,
+                    onSelect = { role = it },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) { option, selected ->
+                    ConnectedChoiceLabel(text = option.name.lowercase(), selected = selected)
+                }
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text(stringResource(R.string.prompt_page_injection_content)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 180.dp),
+                    minLines = 8,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(name.trim(), role, content) },
+                enabled = name.isNotBlank() || content.isNotBlank(),
+            ) {
+                Text(stringResource(R.string.prompt_page_confirm))
+            }
+        },
+        dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.prompt_page_cancel))
             }
         },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StRegexEditDialog(
+    script: StRegexScript,
+    onDismiss: () -> Unit,
+    onSave: (StRegexScript) -> Unit,
+    onDelete: (() -> Unit)? = null,
+) {
+    var name by remember(script.id) { mutableStateOf(script.name) }
+    var findRegex by remember(script.id) { mutableStateOf(script.findRegex) }
+    var replaceString by remember(script.id) { mutableStateOf(script.replaceString) }
+    var placement by remember(script.id) { mutableStateOf(script.placement) }
+    var disabled by remember(script.id) { mutableStateOf(script.disabled) }
+    var markdownOnly by remember(script.id) { mutableStateOf(script.markdownOnly) }
+    var promptOnly by remember(script.id) { mutableStateOf(script.promptOnly) }
+    var substituteRegex by remember(script.id) { mutableStateOf(script.substituteRegex) }
+    var runOnEdit by remember(script.id) { mutableStateOf(script.runOnEdit) }
+    var minDepthStr by remember(script.id) { mutableStateOf(script.minDepth?.toString().orEmpty()) }
+    var maxDepthStr by remember(script.id) { mutableStateOf(script.maxDepth?.toString().orEmpty()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (script.id.isBlank()) stringResource(R.string.prompt_page_st_preset_regex_add)
+                else stringResource(R.string.prompt_page_st_preset_regex_edit)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.prompt_page_name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = findRegex,
+                    onValueChange = { findRegex = it },
+                    label = { Text(stringResource(R.string.prompt_page_st_preset_regex_find)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    textStyle = TextStyle(fontFamily = JetbrainsMono),
+                )
+                OutlinedTextField(
+                    value = replaceString,
+                    onValueChange = { replaceString = it },
+                    label = { Text(stringResource(R.string.prompt_page_st_preset_regex_replace)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    textStyle = TextStyle(fontFamily = JetbrainsMono),
+                )
+
+                Text(
+                    text = stringResource(R.string.prompt_page_st_preset_regex_placement),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = 1 in placement,
+                        onClick = {
+                            placement = if (1 in placement) placement - 1 else placement + 1
+                        },
+                        label = { Text(stringResource(R.string.prompt_page_st_preset_regex_placement_user)) }
+                    )
+                    FilterChip(
+                        selected = 2 in placement,
+                        onClick = {
+                            placement = if (2 in placement) placement - 2 else placement + 2
+                        },
+                        label = { Text(stringResource(R.string.prompt_page_st_preset_regex_placement_ai)) }
+                    )
+                }
+
+                FormItem(
+                    label = { Text(stringResource(R.string.prompt_page_st_preset_regex_markdown_only)) },
+                    tail = {
+                        Switch(
+                            checked = markdownOnly,
+                            onCheckedChange = {
+                                markdownOnly = it
+                                if (it) promptOnly = false
+                            }
+                        )
+                    }
+                )
+
+                FormItem(
+                    label = { Text(stringResource(R.string.prompt_page_st_preset_regex_prompt_only)) },
+                    tail = {
+                        Switch(
+                            checked = promptOnly,
+                            onCheckedChange = {
+                                promptOnly = it
+                                if (it) markdownOnly = false
+                            }
+                        )
+                    }
+                )
+
+                FormItem(
+                    label = { Text(stringResource(R.string.prompt_page_st_preset_regex_substitute)) },
+                    tail = {
+                        Switch(
+                            checked = substituteRegex,
+                            onCheckedChange = { substituteRegex = it }
+                        )
+                    }
+                )
+
+                FormItem(
+                    label = { Text(stringResource(R.string.prompt_page_st_preset_regex_run_on_edit)) },
+                    tail = {
+                        Switch(
+                            checked = runOnEdit,
+                            onCheckedChange = { runOnEdit = it }
+                        )
+                    }
+                )
+
+                FormItem(
+                    label = { Text(stringResource(R.string.prompt_page_disabled)) },
+                    tail = {
+                        Switch(
+                            checked = disabled,
+                            onCheckedChange = { disabled = it }
+                        )
+                    }
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = minDepthStr,
+                        onValueChange = { minDepthStr = it.filter { c -> c.isDigit() } },
+                        label = { Text(stringResource(R.string.prompt_page_st_preset_regex_min_depth)) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = maxDepthStr,
+                        onValueChange = { maxDepthStr = it.filter { c -> c.isDigit() } },
+                        label = { Text(stringResource(R.string.prompt_page_st_preset_regex_max_depth)) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(
+                        script.copy(
+                            id = script.id.ifBlank { UUID.randomUUID().toString() },
+                            name = name.trim(),
+                            findRegex = findRegex,
+                            replaceString = replaceString,
+                            placement = placement,
+                            disabled = disabled,
+                            markdownOnly = markdownOnly,
+                            promptOnly = promptOnly,
+                            substituteRegex = substituteRegex,
+                            runOnEdit = runOnEdit,
+                            minDepth = minDepthStr.toIntOrNull(),
+                            maxDepth = maxDepthStr.toIntOrNull(),
+                        )
+                    )
+                },
+                enabled = findRegex.isNotBlank()
+            ) {
+                Text(stringResource(R.string.prompt_page_confirm))
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onDelete != null) {
+                    TextButton(
+                        onClick = onDelete,
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text(stringResource(R.string.prompt_page_delete))
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.prompt_page_cancel))
+                }
+            }
+        }
     )
 }
 
