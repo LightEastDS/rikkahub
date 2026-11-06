@@ -505,6 +505,16 @@ private fun ChatPageContent(
                         vm.deleteMessage(it)
                     }
                 },
+                onBatchDelete = { nodeIds ->
+                    if (loadingJob != null) {
+                        vm.showDeleteBlockedWhileGeneratingError()
+                    } else {
+                        vm.deleteMessageNodes(nodeIds)
+                    }
+                },
+                onUpdateCheckpointSummary = { checkpointId, newSummary ->
+                    vm.updateCheckpointSummary(checkpointId, newSummary)
+                },
                 onUpdateMessage = { newNode ->
                     vm.selectMessageNode(newNode.id, newNode.selectIndex)
                 },

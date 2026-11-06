@@ -60,6 +60,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.bindConfig
 import me.rerere.rikkahub.data.model.cancelInterruptedTools
 import me.rerere.rikkahub.data.model.deleteMessage
+import me.rerere.rikkahub.data.model.deleteMessageNodes
 import me.rerere.rikkahub.data.model.editMessage
 import me.rerere.rikkahub.data.model.fillModelSnapshots
 import me.rerere.rikkahub.data.model.fork
@@ -1283,6 +1284,16 @@ class ChatService(
         message: UIMessage,
     ) {
         deleteMessage(conversationId, message.id, failIfMissing = false)
+    }
+
+    suspend fun deleteMessageNodes(
+        conversationId: Uuid,
+        nodeIds: Set<Uuid>,
+    ) {
+        if (nodeIds.isEmpty()) return
+        mutate(conversationId) { conversation ->
+            conversation.deleteMessageNodes(nodeIds)
+        }
     }
 
     // 停止当前会话生成任务（不清理会话缓存）

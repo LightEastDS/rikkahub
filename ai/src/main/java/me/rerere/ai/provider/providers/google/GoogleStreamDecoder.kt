@@ -22,7 +22,9 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
+import me.rerere.ai.util.parseErrorDetail
 import me.rerere.common.http.jsonPrimitiveOrNull
+import java.io.IOException
 import kotlin.time.Clock
 
 internal class GoogleStreamDecoder(
@@ -33,12 +35,16 @@ internal class GoogleStreamDecoder(
     private var finishReason: String? = null
     private var finished = false
     private var toolSequence = 0
+    private var hasEmittedOutput = false
+    private var hasEmittedToolCall = false
 
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
 
-        val jsonData = json.parseToJsonElement(event.data).jsonObject
+        val element = json.parseToJsonElement(event.data)
+        val jsonData = element as? JsonObject ?: throw element.parseErrorDetail()
+        jsonData["error"]?.let { throw it.parseErrorDetail() }
         val blockedReason = jsonData["promptFeedback"]?.jsonObject
             ?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
         if (blockedReason != null) error("Prompt feedback: $blockedReason")
@@ -49,12 +55,43 @@ internal class GoogleStreamDecoder(
             candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
             val content = candidate["content"]?.jsonObject ?: return@buildList
             val message = parseMessage(content, candidate["groundingMetadata"] as? JsonObject)
-            addAll(streamState.append(message, responseId))
+            val appended = streamState.append(message, responseId)
+            if (appended.any {
+                    (it is StreamChunk.TextDelta && it.text.isNotEmpty()) ||
+                        it is StreamChunk.ImageDelta ||
+                        it is StreamChunk.ImageSnapshot
+                }
+            ) {
+                hasEmittedOutput = true
+            }
+            if (appended.any {
+                    it is StreamChunk.ToolCallStart ||
+                        it is StreamChunk.ServerToolStart ||
+                        it is StreamChunk.ServerToolEnd
+                }
+            ) {
+                hasEmittedToolCall = true
+            }
+            addAll(appended)
         }
         return DecodeResult(chunks)
     }
 
-    override fun onClosed(): List<StreamChunk> = finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (!finished) {
+            val reason = finishReason
+            if (reason == null && !hasEmittedToolCall) {
+                throw IOException("Google SSE stream closed prematurely without finishReason")
+            }
+            if (!hasEmittedOutput && !hasEmittedToolCall && reason != null && reason != "STOP") {
+                if (reason == "MALFORMED_FUNCTION_CALL" || reason == "OTHER") {
+                    throw IOException("Google generation aborted without output: finishReason=$reason")
+                }
+                error("Google generation stopped without output: finishReason=$reason")
+            }
+        }
+        return finish()
+    }
 
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()
@@ -177,7 +214,7 @@ internal class GoogleStreamDecoder(
             var emittedImages = 0
             message.parts.forEach { part ->
                 when (part) {
-                    is UIMessagePart.Text -> if (part.text.isNotEmpty()) {
+                    is UIMessagePart.Text -> if (part.text.isNotEmpty() || (part.metadata != null && textId != null)) {
                         addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
                         val id = textId ?: nextId(responseId, "text").also {
                             textId = it; add(StreamChunk.TextStart(it, part.metadata))

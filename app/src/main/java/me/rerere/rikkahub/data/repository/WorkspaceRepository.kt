@@ -214,6 +214,22 @@ class WorkspaceRepository(
         }
     }
 
+    /**
+     * 将执行环境内的绝对路径解析为 (存储区, 相对路径), 用于跳转 [me.rerere.rikkahub.Screen.WorkspaceFileEditor].
+     */
+    suspend fun resolveEditorTarget(
+        id: String,
+        absolutePath: String,
+    ): Pair<WorkspaceStorageArea, String> {
+        val normalized = absolutePath.trim().ifBlank { "/" }
+        val workspaceDir = layout(id)?.workspaceDir?.trimEnd('/')?.ifBlank { "/" } ?: "/workspace"
+        return if (workspaceDir != "/" && (normalized == workspaceDir || normalized.startsWith("$workspaceDir/"))) {
+            WorkspaceStorageArea.FILES to normalized.removePrefix("$workspaceDir/").removePrefix(workspaceDir).trimStart('/')
+        } else {
+            WorkspaceStorageArea.LINUX to normalized.trimStart('/')
+        }
+    }
+
     suspend fun listFiles(
         id: String,
         area: WorkspaceStorageArea,

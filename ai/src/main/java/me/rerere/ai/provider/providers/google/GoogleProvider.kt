@@ -63,6 +63,7 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
+import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.removeElements
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
@@ -213,15 +214,34 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
 
         val bodyStr = response.body?.string() ?: ""
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+        val bodyElement = json.parseToJsonElement(bodyStr)
+        val bodyJson = bodyElement as? JsonObject ?: throw bodyElement.parseErrorDetail()
+        bodyJson["error"]?.let { throw it.parseErrorDetail() }
+        val blockedReason = bodyJson["promptFeedback"]?.jsonObject
+            ?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
+        if (blockedReason != null) error("Prompt feedback: $blockedReason")
 
         val candidate = bodyJson["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
             ?: error("No candidates in response")
+        val finishReason = candidate["finishReason"]?.jsonPrimitive?.contentOrNull
+        val parsedMessage = parseMessage(candidate)
+        val hasVisibleOrToolOutput = parsedMessage.parts.any {
+            (it is UIMessagePart.Text && it.text.isNotEmpty()) ||
+                it is UIMessagePart.Tool ||
+                it is UIMessagePart.ServerTool ||
+                it is UIMessagePart.Image
+        }
+        if (!hasVisibleOrToolOutput && finishReason != null && finishReason != "STOP") {
+            if (finishReason == "MALFORMED_FUNCTION_CALL" || finishReason == "OTHER") {
+                throw java.io.IOException("Google generation aborted without output: finishReason=$finishReason")
+            }
+            error("Google generation stopped without output: finishReason=$finishReason")
+        }
         TextGenerationResult(
             id = Uuid.random().toString(),
             model = params.model.modelId,
-            message = parseMessage(candidate),
-            finishReason = candidate["finishReason"]?.jsonPrimitive?.contentOrNull,
+            message = parsedMessage,
+            finishReason = finishReason,
             usage = parseUsageMeta(bodyJson["usageMetadata"] as? JsonObject),
         )
     }
@@ -333,8 +353,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
             override fun onClosed(eventSource: EventSource) {
                 println("[onClosed] 连接已关闭")
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Stream closed with error", e)
+                    close(e)
+                }
             }
         }
 
@@ -528,8 +553,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         val role = googleRoleToCommonRole(
             message["role"]?.jsonPrimitive?.contentOrNull ?: "model"
         )
-        val content = message["content"]?.jsonObject ?: error("No content")
-        val parts = parseMessageParts(content["parts"]?.jsonArray)
+        val content = message["content"]?.jsonObject
+        val parts = parseMessageParts(content?.get("parts")?.jsonArray)
 
         val groundingMetadata = message["groundingMetadata"]?.jsonObject
         Log.i(TAG, "parseMessage: $groundingMetadata")
@@ -734,10 +759,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     }
 
     private fun JsonArrayBuilder.addUserMessage(message: UIMessage) {
+        val googleParts = message.parts.flatMap { it.toGoogleParts() }
+        if (googleParts.isEmpty()) return
         add(buildJsonObject {
             put("role", commonRoleToGoogleRole(message.role))
             putJsonArray("parts") {
-                message.parts.flatMap { it.toGoogleParts() }.forEach { add(it) }
+                googleParts.forEach { add(it) }
             }
         })
     }
@@ -750,18 +777,26 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private fun UIMessagePart.toGooglePart(): JsonObject? = when (this) {
         is UIMessagePart.Text -> {
             val thoughtSignature = metadataAs<GoogleThoughtMetadata>()?.thoughtSignature
-            buildJsonObject {
-                put("text", text)
-                thoughtSignature?.let { put("thoughtSignature", it) }
+            if (text.isEmpty() && thoughtSignature == null) {
+                null
+            } else {
+                buildJsonObject {
+                    put("text", text)
+                    thoughtSignature?.let { put("thoughtSignature", it) }
+                }
             }
         }
 
         is UIMessagePart.Reasoning -> {
             val thoughtSignature = metadataAs<GoogleThoughtMetadata>()?.thoughtSignature
-            buildJsonObject {
-                put("text", reasoning)
-                put("thought", true)
-                thoughtSignature?.let { put("thoughtSignature", it) }
+            if (reasoning.isEmpty() && thoughtSignature == null) {
+                null
+            } else {
+                buildJsonObject {
+                    put("text", reasoning)
+                    put("thought", true)
+                    thoughtSignature?.let { put("thoughtSignature", it) }
+                }
             }
         }
 

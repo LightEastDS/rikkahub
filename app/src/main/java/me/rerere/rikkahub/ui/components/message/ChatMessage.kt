@@ -130,6 +130,7 @@ fun ChatMessage(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleHide: (() -> Unit)? = null,
+    onBatchSelect: (() -> Unit)? = null,
     nodeIndex: Int = -1,
 ) {
     val message = node.messages[node.selectIndex]
@@ -266,6 +267,7 @@ fun ChatMessage(
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
             onToggleHide = onToggleHide,
+            onBatchSelect = onBatchSelect,
             onWebViewPreview = {
                 val textContent = message.parts
                     .filterIsInstance<UIMessagePart.Text>()

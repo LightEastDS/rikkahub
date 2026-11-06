@@ -9,11 +9,17 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +44,8 @@ import me.rerere.hugeicons.stroke.FileEdit
 import me.rerere.hugeicons.stroke.FileView
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
+import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
@@ -258,28 +266,73 @@ private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
     }
 }
 
-/** BottomSheet 详情: 文件路径 + 按扩展名语法高亮的完整内容 */
+/** BottomSheet 详情: 文件路径 + 按扩展名语法高亮的完整内容（支持 Markdown 渲染预览与自动换行开关） */
 @Composable
 private fun FileContentPreview(path: String?, code: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxHeight(0.8f)
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = path ?: stringResource(R.string.tool_ui_file),
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth(),
+    val settings = LocalSettings.current
+    val language = remember(path) { languageOf(path) }
+    val isMarkdown = language == "markdown"
+    var renderMarkdown by remember(isMarkdown) { mutableStateOf(isMarkdown) }
+    var autoWrap by remember { mutableStateOf(true) }
+    val effectiveSettings = remember(settings, autoWrap) {
+        settings.copy(
+            displaySetting = settings.displaySetting.copy(codeBlockAutoWrap = autoWrap)
         )
-        HighlightCodeBlock(
-            code = code,
-            language = languageOf(path),
-            modifier = Modifier.fillMaxWidth(),
-        )
+    }
+
+    CompositionLocalProvider(LocalSettings provides effectiveSettings) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight(0.8f)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = path ?: stringResource(R.string.tool_ui_file),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                FilterChip(
+                    selected = autoWrap,
+                    onClick = { autoWrap = !autoWrap },
+                    label = { Text(stringResource(R.string.workspace_editor_auto_wrap)) },
+                )
+                if (isMarkdown) {
+                    FilterChip(
+                        selected = renderMarkdown,
+                        onClick = { renderMarkdown = !renderMarkdown },
+                        label = {
+                            Text(
+                                if (renderMarkdown) stringResource(R.string.workspace_editor_preview)
+                                else stringResource(R.string.workspace_editor_source)
+                            )
+                        },
+                    )
+                }
+            }
+            if (isMarkdown && renderMarkdown) {
+                SelectionContainer {
+                    MarkdownBlock(
+                        content = code,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                HighlightCodeBlock(
+                    code = code,
+                    language = language,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 

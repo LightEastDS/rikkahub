@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.stpreset
 
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.rikkahub.data.model.CharacterCard
 import kotlin.uuid.Uuid
@@ -683,5 +684,61 @@ class StPromptAssemblerTest {
         assertTrue(secondToLast.toText().contains("</dream_think>"))
         assertEquals(MessageRole.USER, result1.messages.last().role)
         assertEquals("思客，开始输出吧。", result1.messages.last().toText())
+    }
+
+    @Test
+    fun `active assistant tool turn is placed after Zone C so multi-step tool continuation is preserved`() {
+        val preset = preset(
+            prompts = listOf(
+                p("main", "SYS"),
+                p("openHist", "<dream_history>", role = MessageRole.USER),
+                p("chatHistory", marker = true),
+                p("closeHist", "</dream_history>", role = MessageRole.USER),
+                p("lastInput", "<dreamer_input>{{lastUserMessage}}</dreamer_input>", role = MessageRole.USER),
+                p("prefillThink", "类型判定：正常推进\n</dream_think>", role = MessageRole.ASSISTANT),
+                p("goPrompt", "思客，开始输出吧。", role = MessageRole.USER),
+            ),
+            order = listOf(
+                StPromptOrderEntry("main", true),
+                StPromptOrderEntry("openHist", true),
+                StPromptOrderEntry("chatHistory", true),
+                StPromptOrderEntry("closeHist", true),
+                StPromptOrderEntry("lastInput", true),
+                StPromptOrderEntry("prefillThink", true),
+                StPromptOrderEntry("goPrompt", true),
+            ),
+            prefill = "IGNORED_DURING_TOOL_STEP",
+        )
+        val baseHistory = listOf(
+            UIMessage.user("第一轮输入"),
+            UIMessage.assistant("第一轮回复"),
+            UIMessage.user("继续输出"),
+        )
+        val step0 = StPromptAssembler.assemble(preset = preset, history = baseHistory)
+
+        val toolTurn = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Reasoning("思考字数检查"),
+                UIMessagePart.Tool(
+                    toolCallId = "call-1",
+                    toolName = "workspace_shell",
+                    input = """{"command":"python3 /skills/dream-plot-word-count/scripts/count_words.py"}""",
+                    output = listOf(UIMessagePart.Text("1819 字 | 目标 1200-1800 | 超出 19 字")),
+                ),
+            ),
+        )
+        val step1 = StPromptAssembler.assemble(preset = preset, history = baseHistory + toolTurn)
+
+        assertEquals(
+            "Step 1 prefix before toolTurn must match Step 0 (excluding assistantPrefill)",
+            step0.messages.dropLast(1).map { it.role to it.toText() },
+            step1.messages.dropLast(1).map { it.role to it.toText() },
+        )
+        assertEquals(toolTurn, step1.messages.last())
+        assertTrue(
+            "lastUserMessage macro must still resolve to the user's message during tool steps",
+            step1.zoneCMessages.any { it.toText().contains("<dreamer_input>继续输出</dreamer_input>") },
+        )
     }
 }

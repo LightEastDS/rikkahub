@@ -93,9 +93,10 @@ fun StPresetsContent(
             R.string.prompt_page_st_preset_enabled_count,
             record.preset.promptOrder.sumOf { bucket -> bucket.order.count { it.enabled } },
         )
+        val descStats = "$promptCount · $enabledCount"
         ExtensionListItem(
             title = record.preset.name.ifBlank { stringResource(R.string.extension_content_unnamed) },
-            description = "$promptCount · $enabledCount",
+            description = if (record.preset.description.isNotBlank()) "${record.preset.description} · $descStats" else descStats,
             checked = selectedId == record.preset.id,
             onCheckedChange = { checked -> onToggle(record.preset.id, checked) },
             shapes = shapes,

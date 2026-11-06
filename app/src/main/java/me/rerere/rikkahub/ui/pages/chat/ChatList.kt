@@ -13,7 +13,19 @@ import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.Share04
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.utils.writeClipboardText
+import me.rerere.ui.components.RikkaConfirmDialog
+import me.rerere.ui.toast.ToastType
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -143,6 +155,8 @@ fun ChatList(
     onEdit: (UIMessage) -> Unit = {},
     onForkMessage: (UIMessage) -> Unit = {},
     onDelete: (UIMessage) -> Unit = {},
+    onBatchDelete: (Set<Uuid>) -> Unit = {},
+    onUpdateCheckpointSummary: ((checkpointId: String, newSummary: String) -> Unit)? = null,
     onUpdateMessage: (MessageNode) -> Unit = {},
     onClickSuggestion: (String) -> Unit = {},
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)? = null,
@@ -187,6 +201,8 @@ fun ChatList(
                 onEdit = onEdit,
                 onForkMessage = onForkMessage,
                 onDelete = onDelete,
+                onBatchDelete = onBatchDelete,
+                onUpdateCheckpointSummary = onUpdateCheckpointSummary,
                 onUpdateMessage = onUpdateMessage,
                 onClickSuggestion = onClickSuggestion,
                 onTranslate = onTranslate,
@@ -238,6 +254,8 @@ private fun ChatListNormal(
     onEdit: (UIMessage) -> Unit,
     onForkMessage: (UIMessage) -> Unit,
     onDelete: (UIMessage) -> Unit,
+    onBatchDelete: (Set<Uuid>) -> Unit = {},
+    onUpdateCheckpointSummary: ((checkpointId: String, newSummary: String) -> Unit)? = null,
     onUpdateMessage: (MessageNode) -> Unit,
     onClickSuggestion: (String) -> Unit,
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)?,
@@ -288,6 +306,7 @@ private fun ChatListNormal(
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
 
     // 自动跟随键盘滚动
     ImeLazyListAutoScroller(lazyListState = state)
@@ -426,6 +445,11 @@ private fun ChatListNormal(
                                 onToggleFavorite?.invoke(node)
                             },
                             onToggleHide = onToggleHide?.let { action -> { action(node.currentMessage) } },
+                            onBatchSelect = {
+                                selecting = true
+                                selectedItems.clear()
+                                selectedItems.add(node.id)
+                            },
                             onTranslate = onTranslate,
                             onClearTranslation = onClearTranslation,
                             onToolApproval = onToolApproval,
@@ -456,6 +480,9 @@ private fun ChatListNormal(
                         checkpoint = checkpoint,
                         isExpanded = isCheckpointExpanded,
                         onToggleExpand = { isCheckpointExpanded = !isCheckpointExpanded },
+                        onUpdateSummary = onUpdateCheckpointSummary?.let { action ->
+                            { newSummary -> action(checkpoint.id, newSummary) }
+                        },
                     )
                 }
 
@@ -583,7 +610,26 @@ private fun ChatListNormal(
                     }
                     Tooltip(
                         tooltip = {
-                            Text("Confirm")
+                            Text(stringResource(R.string.delete))
+                        }
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (selectedItems.isNotEmpty()) {
+                                    showBatchDeleteConfirm = true
+                                }
+                            },
+                            enabled = selectedItems.isNotEmpty(),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(HugeIcons.Delete01, stringResource(R.string.delete))
+                        }
+                    }
+                    Tooltip(
+                        tooltip = {
+                            Text(stringResource(R.string.export_title))
                         }
                     ) {
                         FilledIconButton(
@@ -593,12 +639,32 @@ private fun ChatListNormal(
                                 if (messages.isNotEmpty()) {
                                     showExportSheet = true
                                 }
-                            }
+                            },
+                            enabled = selectedItems.isNotEmpty(),
                         ) {
-                            Icon(HugeIcons.Tick01, null)
+                            Icon(HugeIcons.Share04, stringResource(R.string.export_title))
                         }
                     }
                 }
+            }
+
+            RikkaConfirmDialog(
+                show = showBatchDeleteConfirm,
+                title = stringResource(R.string.chat_message_batch_delete_title),
+                confirmText = stringResource(R.string.delete),
+                dismissText = stringResource(R.string.cancel),
+                onConfirm = {
+                    showBatchDeleteConfirm = false
+                    val idsToDelete = selectedItems.toSet()
+                    selecting = false
+                    selectedItems.clear()
+                    if (idsToDelete.isNotEmpty()) {
+                        onBatchDelete(idsToDelete)
+                    }
+                },
+                onDismiss = { showBatchDeleteConfirm = false },
+            ) {
+                Text(stringResource(R.string.chat_message_batch_delete_confirm, selectedItems.size))
             }
 
             // 导出对话框
@@ -963,14 +1029,19 @@ private fun CompactedSummaryCard(
     checkpoint: ConversationCheckpointEntity,
     isExpanded: Boolean,
     onToggleExpand: () -> Unit,
+    onUpdateSummary: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val toaster = LocalToaster.current
     var isSummaryExpanded by rememberSaveable(checkpoint.id) { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
     val collapsedPreview = remember(checkpoint.summaryContent) {
         buildCollapsedSummaryPreview(checkpoint.summaryContent)
     }
     val isCollapsible = collapsedPreview != null
     val containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val copiedToastText = stringResource(R.string.copied_to_clipboard)
 
     Surface(
         modifier = modifier
@@ -1054,29 +1125,116 @@ private fun CompactedSummaryCard(
                 }
             }
 
-            if (isCollapsible) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            ) {
+                if (isCollapsible) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { isSummaryExpanded = !isSummaryExpanded }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (isSummaryExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = if (isSummaryExpanded) "收起压缩内容" else "展开压缩内容",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { isSummaryExpanded = !isSummaryExpanded }
+                        .clickable {
+                            context.writeClipboardText(checkpoint.summaryContent)
+                            toaster.show(copiedToastText, type = ToastType.Success)
+                        }
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
-                        imageVector = if (isSummaryExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
+                        imageVector = HugeIcons.Copy01,
+                        contentDescription = stringResource(R.string.copy),
+                        modifier = Modifier.size(15.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                     Text(
-                        text = if (isSummaryExpanded) "收起压缩内容" else "展开压缩内容",
+                        text = stringResource(R.string.copy),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
+
+                if (onUpdateSummary != null) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showEditDialog = true }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Edit01,
+                            contentDescription = stringResource(R.string.edit),
+                            modifier = Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = stringResource(R.string.edit),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
             }
         }
+    }
+
+    if (showEditDialog && onUpdateSummary != null) {
+        var editedSummary by remember(checkpoint.summaryContent) { mutableStateOf(checkpoint.summaryContent) }
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text(stringResource(R.string.compact_summary_edit_title)) },
+            text = {
+                OutlinedTextField(
+                    value = editedSummary,
+                    onValueChange = { editedSummary = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 160.dp, max = 420.dp),
+                    minLines = 6,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onUpdateSummary(editedSummary.trim())
+                        showEditDialog = false
+                    },
+                    enabled = editedSummary.isNotBlank(),
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 

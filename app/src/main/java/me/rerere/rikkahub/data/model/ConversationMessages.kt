@@ -25,6 +25,16 @@ internal fun Conversation.deleteMessage(messageId: Uuid): Conversation? {
 }
 
 /**
+ * 批量删除多轮对话记录（按节点 ID 列表删除整轮节点）。
+ */
+internal fun Conversation.deleteMessageNodes(nodeIds: Set<Uuid>): Conversation {
+    if (nodeIds.isEmpty()) return this
+    val updatedNodes = messageNodes.filterNot { it.id in nodeIds }
+    if (updatedNodes.size == messageNodes.size) return this
+    return copy(messageNodes = updatedNodes)
+}
+
+/**
  * 用 [parts] 替换消息的内容，作为原节点的新分支；压缩检查点原地改写。消息不存在时原样返回。
  */
 internal fun Conversation.editMessage(messageId: Uuid, parts: List<UIMessagePart>): Conversation {

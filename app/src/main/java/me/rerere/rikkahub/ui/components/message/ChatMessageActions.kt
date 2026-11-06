@@ -46,6 +46,7 @@ import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.FavouriteCircle
+import me.rerere.hugeicons.stroke.CheckList
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Refresh03
@@ -268,6 +269,7 @@ fun ChatMessageActionsSheet(
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
     onToggleHide: (() -> Unit)? = null,
+    onBatchSelect: (() -> Unit)? = null,
     onWebViewPreview: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
@@ -285,6 +287,9 @@ fun ChatMessageActionsSheet(
             }
             add(MessageSheetAction(HugeIcons.Edit01, stringResource(R.string.edit), onClick = onEdit))
             add(MessageSheetAction(HugeIcons.Share04, stringResource(R.string.share), onClick = onShare))
+            if (onBatchSelect != null) {
+                add(MessageSheetAction(HugeIcons.CheckList, stringResource(R.string.chat_message_batch_select), onClick = onBatchSelect))
+            }
             add(MessageSheetAction(HugeIcons.GitFork, stringResource(R.string.create_fork), onClick = onFork))
             if (onToggleFavorite != null) {
                 add(

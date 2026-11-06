@@ -42,6 +42,7 @@ data class StAssemblyRequest(
     val random: Random = Random.Default,
     val now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
     val flattenSystemMessages: Boolean = false,
+    val macroContextOverride: StMacroContext? = null,
 )
 
 /**
@@ -212,12 +213,23 @@ object StPromptAssembler {
             preset.prompts.map { StPromptOrderEntry(identifier = it.identifier, enabled = true) }
         }
 
-        val macroContext = buildMacroContext(
+        val activeToolTurn = req.liveMessages.lastOrNull()?.takeIf {
+            it.role == MessageRole.ASSISTANT &&
+                it.getTools().isNotEmpty() &&
+                req.generationType != StGenerationType.CONTINUE
+        }
+        val historyMessages = if (activeToolTurn != null) {
+            req.liveMessages.dropLast(1)
+        } else {
+            req.liveMessages
+        }
+
+        val macroContext = req.macroContextOverride ?: buildMacroContext(
             character = character,
             personaName = req.personaName,
             personaDescription = req.personaDescription,
             modelName = req.modelName,
-            history = req.liveMessages,
+            history = historyMessages,
         )
 
         val lockedVars = req.userLockedVariables ?: req.variables.toMap()
@@ -448,16 +460,16 @@ object StPromptAssembler {
                     """.trimIndent()
                 )
                 if (req.historyAlreadyTrimmed) {
-                    zoneB += req.liveMessages.filterNot { it.isHidden }
+                    zoneB += historyMessages.filterNot { it.isHidden }
                 } else {
                     zoneB += trimHistoryForCheckpoint(
-                        messages = req.liveMessages,
+                        messages = historyMessages,
                         checkpoint = req.checkpoint,
                         milestoneMessageIds = req.milestoneMessageIds,
                     )
                 }
             } else {
-                zoneB += req.liveMessages.filterNot { it.isHidden }
+                zoneB += historyMessages.filterNot { it.isHidden }
             }
             historyFound = true
         }
@@ -525,7 +537,7 @@ object StPromptAssembler {
             }
         }
 
-        if (!historyMarkerFound && req.liveMessages.isNotEmpty()) {
+        if (!historyMarkerFound && historyMessages.isNotEmpty()) {
             warnings += "预设没有启用 chatHistory marker，聊天记录已追加到提示词末尾"
         }
 
@@ -577,10 +589,16 @@ object StPromptAssembler {
         if (preset.settings.squashSystemMessages) {
             finalMessages = squashConsecutiveSystem(finalMessages)
         }
-        if (preset.settings.assistantPrefill.isNotBlank()) {
+        if (preset.settings.assistantPrefill.isNotBlank() && activeToolTurn == null) {
             val prefillMsg = UIMessage.assistant(preset.settings.assistantPrefill).copy(isSynthetic = true)
             zoneC += prefillMsg
             finalMessages = finalMessages + prefillMsg
+        }
+        if (activeToolTurn != null) {
+            // 多步工具调用进行中：保持 Zone A + Zone B + Zone C（含预填充对话/回复）与第 0 步完全一致，
+            // 将包含已执行工具调用的当前助手消息置于最末尾，确保模型在工具结果后直接继续输出正文并命中前缀缓存。
+            zoneC += activeToolTurn
+            finalMessages = finalMessages + activeToolTurn
         }
         if (unknownMarkers.isNotEmpty()) {
             warnings += "未知 marker：${unknownMarkers.joinToString("、")}（已跳过）"
@@ -632,6 +650,7 @@ object StPromptAssembler {
         random: Random = Random.Default,
         now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
         flattenSystemMessages: Boolean = false,
+        macroContextOverride: StMacroContext? = null,
     ): StAssemblyResult = assemble(
         StAssemblyRequest(
             preset = preset,
@@ -653,6 +672,7 @@ object StPromptAssembler {
             random = random,
             now = now,
             flattenSystemMessages = flattenSystemMessages,
+            macroContextOverride = macroContextOverride,
         )
     )
 
@@ -952,8 +972,15 @@ object StPromptAssembler {
         modelName: String,
         history: List<UIMessage>,
     ): StMacroContext {
-        val lastUser = history.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
-        val lastChar = history.lastOrNull { it.role == MessageRole.ASSISTANT }?.toText().orEmpty()
+        val lastUser = history.lastOrNull { it.role == MessageRole.USER && it.toText().isNotBlank() }
+            ?.toText()
+            ?: history.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
+        val lastChar = history.lastOrNull { it.role == MessageRole.ASSISTANT && it.toText().isNotBlank() }
+            ?.toText()
+            ?: history.lastOrNull { it.role == MessageRole.ASSISTANT }?.toText().orEmpty()
+        val lastMsg = history.lastOrNull { it.toText().isNotBlank() }
+            ?.toText()
+            ?: history.lastOrNull()?.toText().orEmpty()
         return StMacroContext(
             characterName = character?.name.orEmpty(),
             userName = personaName,
@@ -964,7 +991,7 @@ object StPromptAssembler {
             mesExample = character?.mesExample.orEmpty(),
             modelName = modelName,
             input = lastUser,
-            lastMessage = history.lastOrNull()?.toText().orEmpty(),
+            lastMessage = lastMsg,
             lastUserMessage = lastUser,
             lastCharMessage = lastChar,
         )

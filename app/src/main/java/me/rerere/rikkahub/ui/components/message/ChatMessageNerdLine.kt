@@ -45,12 +45,16 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeftRight
+import me.rerere.hugeicons.stroke.Clock02
+import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.Layers01
 import me.rerere.hugeicons.stroke.Message01
 import me.rerere.hugeicons.stroke.Repeat
+import me.rerere.hugeicons.stroke.Upload02
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.TokenUsageStyle
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.utils.countWords
@@ -139,28 +143,65 @@ fun ChatMessageNerdLine(
                     }
 
                     if (showTokenStats && stats != null) {
-                        if (stats.steps > 1) {
-                            StatsItem(
-                                icon = { StatsIcon(HugeIcons.Repeat, stringResource(R.string.chat_message_usage_step_count)) },
-                                content = { Text(text = stringResource(R.string.chat_message_usage_steps, stats.steps)) }
-                            )
-                        }
-                        if (stats.tps != null) {
-                            StatsItem(
-                                icon = { StatsIcon(HugeIcons.Zap, stringResource(R.string.chat_message_usage_speed)) },
-                                content = { Text(text = "${stats.tps.toFixed(1)} tok/s") }
-                            )
-                        }
-                        StatsItem(
-                            icon = { StatsIcon(HugeIcons.Layers01, stringResource(R.string.chat_message_usage_context)) },
-                            content = {
-                                Text(text = stringResource(R.string.chat_message_usage_context_short, stats.contextTokens.formatNumber()))
-                                val cached = stats.lastUsage.cachedTokens
-                                if (cached > 0) {
-                                    Text(text = stringResource(R.string.chat_message_usage_cached_short, cached.formatNumber()))
+                        when (settings.displaySetting.tokenUsageStyle) {
+                            TokenUsageStyle.COMPACT -> {
+                                if (stats.steps > 1) {
+                                    StatsItem(
+                                        icon = { StatsIcon(HugeIcons.Repeat, stringResource(R.string.chat_message_usage_step_count)) },
+                                        content = { Text(text = stringResource(R.string.chat_message_usage_steps, stats.steps)) }
+                                    )
+                                }
+                                if (stats.tps != null) {
+                                    StatsItem(
+                                        icon = { StatsIcon(HugeIcons.Zap, stringResource(R.string.chat_message_usage_speed)) },
+                                        content = { Text(text = "${stats.tps.toFixed(1)} tok/s") }
+                                    )
+                                }
+                                StatsItem(
+                                    icon = { StatsIcon(HugeIcons.Layers01, stringResource(R.string.chat_message_usage_context)) },
+                                    content = {
+                                        Text(text = stringResource(R.string.chat_message_usage_context_short, stats.contextTokens.formatNumber()))
+                                        val cached = stats.lastUsage.cachedTokens
+                                        if (cached > 0) {
+                                            Text(text = stringResource(R.string.chat_message_usage_cached_short, cached.formatNumber()))
+                                        }
+                                    }
+                                )
+                            }
+
+                            TokenUsageStyle.DETAILED -> {
+                                StatsItem(
+                                    icon = { StatsIcon(HugeIcons.Upload02, stringResource(R.string.chat_message_usage_input)) },
+                                    content = {
+                                        val cached = stats.total.cachedTokens
+                                        val text = if (cached > 0) {
+                                            "${stats.total.promptTokens.formatNumber()} (${cached.formatNumber()} cached)"
+                                        } else {
+                                            "${stats.total.promptTokens.formatNumber()} tokens"
+                                        }
+                                        Text(text = text)
+                                    }
+                                )
+                                StatsItem(
+                                    icon = { StatsIcon(HugeIcons.Download04, stringResource(R.string.chat_message_usage_output)) },
+                                    content = {
+                                        Text(text = "${stats.total.completionTokens.formatNumber()} tokens")
+                                    }
+                                )
+                                if (stats.tps != null) {
+                                    StatsItem(
+                                        icon = { StatsIcon(HugeIcons.Zap, stringResource(R.string.chat_message_usage_speed)) },
+                                        content = { Text(text = "${stats.tps.toFixed(1)} tok/s") }
+                                    )
+                                }
+                                if (stats.durationMillis != null) {
+                                    StatsItem(
+                                        icon = { StatsIcon(HugeIcons.Clock02, stringResource(R.string.chat_message_usage_duration)) },
+                                        content = { Text(text = "${(stats.durationMillis / 1000f).toFixed(1)}s") }
+                                    )
                                 }
                             }
-                        )
+                        }
                     }
 
                     if (settings.displaySetting.showWordCount) {

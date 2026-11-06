@@ -14,6 +14,7 @@ import kotlin.uuid.Uuid
 data class StPreset(
     val id: Uuid = Uuid.random(),
     val name: String = "",
+    val description: String = "",
     val prompts: List<StPrompt> = emptyList(),
     val promptOrder: List<StPromptOrderBucket> = emptyList(),
     val settings: StGenerationSettings = StGenerationSettings(),

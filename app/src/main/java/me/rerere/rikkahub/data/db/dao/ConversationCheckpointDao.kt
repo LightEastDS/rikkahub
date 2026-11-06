@@ -21,6 +21,9 @@ interface ConversationCheckpointDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(checkpoint: ConversationCheckpointEntity)
 
+    @Query("UPDATE conversation_checkpoint SET summary_content = :summaryContent, compressed_tokens = :compressedTokens WHERE id = :id")
+    suspend fun updateSummary(id: String, summaryContent: String, compressedTokens: Int)
+
     @Query("DELETE FROM conversation_checkpoint WHERE conversation_id = :conversationId")
     suspend fun deleteByConversationId(conversationId: String)
 

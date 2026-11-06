@@ -33,19 +33,24 @@ class WorkspaceReminderTransformer(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val workspaceId = ctx.assistant.workspaceId?.toString() ?: return messages
-        val workspace = workspaceRepository.getById(workspaceId) ?: return messages
-        // 与 ChatToolFactory.createWorkspaceToolsIfReady 保持一致: 仅在 shell 就绪时注入
-        if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return messages
-        val layout = workspaceRepository.layout(workspaceId) ?: return messages
+        val prompt = buildPrompt(ctx) ?: return messages
+        return messages.withPrompt(prompt)
+    }
 
-        val prompt = if (workspace.isSsh()) {
+    suspend fun buildPrompt(ctx: TransformerContext): String? {
+        val workspaceId = ctx.assistant.workspaceId?.toString() ?: return null
+        val workspace = workspaceRepository.getById(workspaceId) ?: return null
+        // 与 ChatToolFactory.createWorkspaceToolsIfReady 保持一致: 仅在 shell 就绪时注入
+        if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return null
+        val layout = workspaceRepository.layout(workspaceId) ?: return null
+
+        return if (workspace.isSsh()) {
             val environment = remoteEnvironments.get(workspaceId, workspace.sshConfig) {
                 // shell 探测需要连接, 失败时不再读发行版, 以免再等一次超时
                 RemoteEnvironment(shell = workspaceRepository.shell(workspaceId), distro = readDistroName(workspaceId))
             }.getOrElse { e ->
                 Log.w("WorkspaceReminder", "Workspace unreachable: $workspaceId", e)
-                return messages.withPrompt(buildUnreachablePrompt(workspace, layout, e))
+                return buildUnreachablePrompt(workspace, layout, e)
             }
             buildSshWorkspacePrompt(workspace, layout, environment.shell, environment.distro, ctx.workspaceCwd)
         } else {
@@ -56,7 +61,6 @@ class WorkspaceReminderTransformer(
                 cwd = ctx.workspaceCwd,
             ) + buildAgentsPrompt(workspaceId, ctx.workspaceCwd)
         }
-        return messages.withPrompt(prompt)
     }
 
     // 追加到第一条 system 消息; 若不存在则插入一条

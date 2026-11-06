@@ -31,6 +31,7 @@ import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
+import me.rerere.rikkahub.data.ai.transformers.TransformerContext
 import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transformThinkTags
@@ -98,6 +99,8 @@ class ChatRequestFactory(
     private val stVariableRepository: StVariableRepository,
     private val checkpointRepository: ConversationCheckpointRepository,
 ) {
+    private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
+
     private val inputTransformers: List<InputMessageTransformer> = listOf(
         TimeReminderTransformer,
         PromptInjectionTransformer,
@@ -105,16 +108,15 @@ class ChatRequestFactory(
         DocumentAsPromptTransformer,
         OcrTransformer,
         templateTransformer,
-        WorkspaceReminderTransformer(workspaceRepository),
+        workspaceReminderTransformer,
     )
 
-    // ST 预设模式下只保留内容级转换：PromptInjection/Placeholder 由组装器接管
+    // ST 预设模式下只保留内容级转换：PromptInjection/Placeholder 由组装器接管，WorkspaceReminder 注入到 Zone A 系统提示词
     private val presetHistoryTransformers: List<InputMessageTransformer> = listOf(
         TimeReminderTransformer,
         DocumentAsPromptTransformer,
         OcrTransformer,
         templateTransformer,
-        WorkspaceReminderTransformer(workspaceRepository),
     )
 
     private val outputTransformers: List<OutputMessageTransformer> = listOf(        ThinkTagTransformer,
@@ -403,8 +405,25 @@ class ChatRequestFactory(
         val character = assistant.characterCard
         val personaName = turn.settings.displaySetting.userNickname
         val personaDescription = turn.settings.displaySetting.userPersona
-        val lastUserText = history.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
-        val lastCharText = history.lastOrNull { it.role == MessageRole.ASSISTANT }?.toText().orEmpty()
+        val activeToolTurn = history.lastOrNull()?.takeIf {
+            it.role == MessageRole.ASSISTANT &&
+                it.getTools().isNotEmpty() &&
+                generationType != StGenerationType.CONTINUE
+        }
+        val chatHistory = if (activeToolTurn != null) {
+            history.dropLast(1)
+        } else {
+            history
+        }
+        val lastUserText = chatHistory.lastOrNull { it.role == MessageRole.USER && it.toText().isNotBlank() }
+            ?.toText()
+            ?: chatHistory.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
+        val lastCharText = chatHistory.lastOrNull { it.role == MessageRole.ASSISTANT && it.toText().isNotBlank() }
+            ?.toText()
+            ?: chatHistory.lastOrNull { it.role == MessageRole.ASSISTANT }?.toText().orEmpty()
+        val lastMsgText = chatHistory.lastOrNull { it.toText().isNotBlank() }
+            ?.toText()
+            ?: chatHistory.lastOrNull()?.toText().orEmpty()
         val macroContext = StMacroContext(
             characterName = character?.name.orEmpty(),
             userName = personaName,
@@ -415,13 +434,13 @@ class ChatRequestFactory(
             mesExample = character?.mesExample.orEmpty(),
             modelName = turn.model.displayName,
             input = lastUserText,
-            lastMessage = history.lastOrNull()?.toText().orEmpty(),
+            lastMessage = lastMsgText,
             lastUserMessage = lastUserText,
             lastCharMessage = lastCharText,
         )
         val regexMacroResolver = StMacroResolver(variables, globalVariables, lockedVariables = presetVariables)
         val regexResult = StRegexPipeline.applyToMessages(
-            messages = history,
+            messages = chatHistory,
             scripts = preset.regexScripts,
             substitute = { regexMacroResolver.render(it, macroContext) },
         )
@@ -439,6 +458,16 @@ class ChatRequestFactory(
             else -> false
         }
 
+        val workspacePrompt = workspaceReminderTransformer.buildPrompt(
+            TransformerContext(
+                context = context,
+                model = turn.model,
+                assistant = assistant,
+                settings = turn.settings,
+                workspaceCwd = turn.workspaceCwd,
+            )
+        )
+
         val extraSystem = buildString {
             if (assistant.enableMemory) {
                 append(buildMemoryPrompt(turn.memories))
@@ -446,6 +475,10 @@ class ChatRequestFactory(
             turn.tools.forEach { tool ->
                 if (isNotEmpty()) appendLine()
                 append(tool.systemPrompt(turn.model, regexResult.messages.filter { !it.isHidden }))
+            }
+            if (!workspacePrompt.isNullOrBlank()) {
+                if (isNotEmpty()) appendLine()
+                append(workspacePrompt)
             }
             // 预设没有启用 main marker 时不能把助手的 system prompt 弄丢
             if (!preset.hasEnabledMarker("main") && assistant.systemPrompt.isNotBlank()) {
@@ -465,7 +498,7 @@ class ChatRequestFactory(
 
         val assembly = StPromptAssembler.assemble(
             preset = preset,
-            history = regexResult.messages,
+            history = if (activeToolTurn != null) regexResult.messages + activeToolTurn else regexResult.messages,
             character = character,
             assistantSystemPrompt = assistant.systemPrompt,
             personaName = personaName,
@@ -481,6 +514,7 @@ class ChatRequestFactory(
             userLockedVariables = presetVariables,
             globalVariables = globalVariables,
             flattenSystemMessages = flattenSystemMessages,
+            macroContextOverride = macroContext,
         )
         logAssemblyReport(preset, assembly.report)
 

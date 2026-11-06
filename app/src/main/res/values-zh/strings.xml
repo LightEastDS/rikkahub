@@ -1875,4 +1875,17 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="prompt_page_st_preset_regex_run_on_edit">编辑时运行</string>
   <string name="prompt_page_st_preset_regex_min_depth">最小深度</string>
   <string name="prompt_page_st_preset_regex_max_depth">最大深度</string>
+  <string name="copied_to_clipboard">已复制到剪贴板</string>
+  <string name="compact_summary_edit_title">编辑压缩内容</string>
+  <string name="chat_message_batch_select">批量选择</string>
+  <string name="chat_message_batch_delete_title">批量删除消息</string>
+  <string name="chat_message_batch_delete_confirm">确定要删除已选中的 %1$d 条消息记录吗？此操作无法撤销。</string>
+  <string name="setting_display_page_token_usage_style_title">Token 用量显示样式</string>
+  <string name="setting_display_page_token_usage_style_desc">选择在消息下方显示精简摘要还是直接展示完整 Token 统计</string>
+  <string name="setting_display_page_token_usage_style_compact">精简（点击查看详情）</string>
+  <string name="setting_display_page_token_usage_style_detailed">完整（输入/输出/速度/耗时）</string>
+  <string name="workspace_file_preview">预览</string>
+  <string name="workspace_editor_preview">预览</string>
+  <string name="workspace_editor_source">源码</string>
+  <string name="workspace_editor_auto_wrap">自动换行</string>
 </resources>

@@ -195,6 +195,25 @@ class StPresetRepository(
         cache.remove(id.toString())
     }
 
+    /** 修改预设副本的名称与描述。 */
+    suspend fun updateMetadata(
+        id: Uuid,
+        name: String,
+        description: String,
+    ) {
+        val key = id.toString()
+        val entity = dao.getById(key) ?: return
+        val updatedRaw = StPresetDocumentEditor.updateMetadata(
+            rawJson = entity.rawJson,
+            name = name,
+            description = description,
+        )
+        if (updatedRaw != entity.rawJson) {
+            dao.updateRawJson(key, updatedRaw)
+            cache.remove(key)
+        }
+    }
+
     /** 修改预设副本里的单条提示正文/名称/角色。 */
     suspend fun updatePrompt(
         id: Uuid,

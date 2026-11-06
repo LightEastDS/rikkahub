@@ -1873,4 +1873,17 @@
   <string name="prompt_page_st_preset_regex_run_on_edit">Run on edit</string>
   <string name="prompt_page_st_preset_regex_min_depth">Min depth</string>
   <string name="prompt_page_st_preset_regex_max_depth">Max depth</string>
+  <string name="copied_to_clipboard">Copied to clipboard</string>
+  <string name="compact_summary_edit_title">Edit Compressed Summary</string>
+  <string name="chat_message_batch_select">Batch Select</string>
+  <string name="chat_message_batch_delete_title">Batch Delete Messages</string>
+  <string name="chat_message_batch_delete_confirm">Are you sure you want to delete the %1$d selected messages? This action cannot be undone.</string>
+  <string name="setting_display_page_token_usage_style_title">Token Usage Display Style</string>
+  <string name="setting_display_page_token_usage_style_desc">Choose between compact summary or full inline token usage stats</string>
+  <string name="setting_display_page_token_usage_style_compact">Compact (Tap for details)</string>
+  <string name="setting_display_page_token_usage_style_detailed">Detailed (In/Out/Speed/Time)</string>
+  <string name="workspace_file_preview">Preview</string>
+  <string name="workspace_editor_preview">Preview</string>
+  <string name="workspace_editor_source">Source</string>
+  <string name="workspace_editor_auto_wrap">Word Wrap</string>
 </resources>

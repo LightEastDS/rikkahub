@@ -268,6 +268,18 @@ class ChatVM(
         }
     }
 
+    fun deleteMessageNodes(nodeIds: Set<Uuid>) {
+        viewModelScope.launch {
+            chatService.deleteMessageNodes(_conversationId, nodeIds)
+        }
+    }
+
+    fun updateCheckpointSummary(checkpointId: String, newSummary: String) {
+        viewModelScope.launch {
+            checkpointRepository.updateSummary(checkpointId, newSummary)
+        }
+    }
+
     fun executeHideCommand(command: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val result = chatService.executeHideCommand(_conversationId, command)

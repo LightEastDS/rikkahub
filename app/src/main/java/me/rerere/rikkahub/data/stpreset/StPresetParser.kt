@@ -97,6 +97,7 @@ object StPresetParser {
         val name = root.string("name")?.takeIf { it.isNotBlank() }
             ?: root.string("preset_name")?.takeIf { it.isNotBlank() }
             ?: fallbackName
+        val description = root.string("description").orEmpty()
 
         val prompts = mutableListOf<StPrompt>()
         val seenIdentifiers = mutableSetOf<String>()
@@ -172,6 +173,7 @@ object StPresetParser {
         val preset = StPreset(
             id = id,
             name = name,
+            description = description,
             prompts = prompts,
             promptOrder = promptOrder,
             settings = settings,

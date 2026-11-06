@@ -92,6 +92,16 @@ class PromptVM(
         }
     }
 
+    fun updateStPresetMetadata(
+        id: Uuid,
+        name: String,
+        description: String,
+    ) {
+        viewModelScope.launch {
+            stPresetRepository.updateMetadata(id, name, description)
+        }
+    }
+
     fun updateStPrompt(
         id: Uuid,
         identifier: String,

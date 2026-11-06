@@ -1453,7 +1453,9 @@ private fun StPresetTab(
             userPersona = userPersona,
             onDismiss = { detailId = null },
             onTogglePreset = { vm.setStPresetEnabled(record.preset.id, it) },
-            onToggleAutoOptimizeOrder = { vm.setStPresetAutoOptimizeOrder(record.preset.id, it) },
+            onUpdateMetadata = { name, description ->
+                vm.updateStPresetMetadata(record.preset.id, name, description)
+            },
             onTogglePrompt = { orderIndex, enabled ->
                 vm.setStPromptEnabled(record.preset.id, orderIndex, enabled)
             },
@@ -1464,7 +1466,10 @@ private fun StPresetTab(
                 vm.reorderStPrompt(record.preset.id, fromIndex, toIndex)
             },
             onResetPreset = { vm.resetStPreset(record.preset.id) },
-            onOptimizeOrder = { vm.optimizeStPresetOrder(record.preset.id) },
+            onOptimizeOrder = {
+                vm.optimizeStPresetOrder(record.preset.id)
+                toaster.show(context.getString(R.string.prompt_page_st_preset_optimize_order_success))
+            },
             onUpdatePrompt = { identifier, name, role, content ->
                 vm.updateStPrompt(record.preset.id, identifier, name, content, role)
             },
@@ -1536,13 +1541,26 @@ private fun StPresetCard(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-                Text(
-                    text = preset.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
-                    style = MaterialTheme.typography.titleMediumEmphasized,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier.weight(1f),
-                )
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = preset.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
+                        style = MaterialTheme.typography.titleMediumEmphasized,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (preset.description.isNotBlank()) {
+                        Text(
+                            text = preset.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 Switch(checked = record.enabled, onCheckedChange = onToggle)
                 ItemActionMenu(
                     actions = listOf(
@@ -1599,7 +1617,7 @@ private fun StPresetEditSheet(
     userPersona: String,
     onDismiss: () -> Unit,
     onTogglePreset: (Boolean) -> Unit,
-    onToggleAutoOptimizeOrder: (Boolean) -> Unit = {},
+    onUpdateMetadata: (name: String, description: String) -> Unit = { _, _ -> },
     onTogglePrompt: (orderIndex: Int, enabled: Boolean) -> Unit,
     onMovePrompt: (orderIndex: Int, delta: Int) -> Unit,
     onReorderPrompt: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
@@ -1621,6 +1639,8 @@ private fun StPresetEditSheet(
     )
     val scope = rememberCoroutineScope()
     val preset = record.preset
+    var presetName by remember(preset.id, preset.name) { mutableStateOf(preset.name) }
+    var presetDescription by remember(preset.id, preset.description) { mutableStateOf(preset.description) }
     val rows = remember(preset) { StPromptAssembler.editablePrompts(preset) }
     val mountedRows = rows.filter { it.orderIndex != null }
     val detachedRows = rows.filter { it.orderIndex == null }
@@ -1684,25 +1704,36 @@ private fun StPresetEditSheet(
             ) {
                 item {
                     OutlinedTextField(
-                        value = preset.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
-                        onValueChange = {},
+                        value = presetName,
+                        onValueChange = {
+                            presetName = it
+                            onUpdateMetadata(it, presetDescription)
+                        },
                         label = { Text(stringResource(R.string.prompt_page_name)) },
-                        readOnly = true,
+                        placeholder = { Text(stringResource(R.string.prompt_page_unnamed)) },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
                 item {
                     OutlinedTextField(
-                        value = stringResource(
-                            R.string.prompt_page_st_preset_summary,
-                            preset.prompts.size,
-                            preset.promptOrder.sumOf { it.order.size },
-                            preset.regexScripts.size,
-                        ) + "\n" + stringResource(R.string.prompt_page_st_preset_copy_hint),
-                        onValueChange = {},
+                        value = presetDescription,
+                        onValueChange = {
+                            presetDescription = it
+                            onUpdateMetadata(presetName, it)
+                        },
                         label = { Text(stringResource(R.string.prompt_page_description)) },
-                        readOnly = true,
+                        supportingText = {
+                            Text(
+                                text = stringResource(
+                                    R.string.prompt_page_st_preset_summary,
+                                    preset.prompts.size,
+                                    preset.promptOrder.sumOf { it.order.size },
+                                    preset.regexScripts.size,
+                                ) + "\n" + stringResource(R.string.prompt_page_st_preset_copy_hint),
+                            )
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
                     )
@@ -1715,19 +1746,6 @@ private fun StPresetEditSheet(
                             Switch(
                                 checked = record.enabled,
                                 onCheckedChange = onTogglePreset,
-                            )
-                        }
-                    )
-                }
-
-                item {
-                    FormItem(
-                        label = { Text(stringResource(R.string.prompt_page_st_preset_auto_optimize_order)) },
-                        description = { Text(stringResource(R.string.prompt_page_st_preset_auto_optimize_order_desc)) },
-                        tail = {
-                            Switch(
-                                checked = record.autoOptimizeOrder,
-                                onCheckedChange = onToggleAutoOptimizeOrder,
                             )
                         }
                     )

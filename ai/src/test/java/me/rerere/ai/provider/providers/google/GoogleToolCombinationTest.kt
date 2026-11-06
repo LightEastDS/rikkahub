@@ -161,6 +161,40 @@ class GoogleToolCombinationTest {
         )
     }
 
+    @Test(expected = java.io.IOException::class)
+    fun `stream decoder throws IOException on premature close without finishReason`() {
+        val event = SseEvent(data = json.encodeToString(buildJsonObject {
+            putJsonArray("candidates") {
+                add(buildJsonObject {
+                    put("content", buildJsonObject {
+                        put("role", "model")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject {
+                                put("text", "partial response before disconnect")
+                            })
+                        })
+                    })
+                })
+            }
+        }))
+        val decoder = GoogleStreamDecoder("response-1", "gemini-3.6-flash")
+        decoder.accept(event)
+        decoder.onClosed()
+    }
+
+    @Test(expected = Exception::class)
+    fun `stream decoder throws when SSE event contains error object`() {
+        val errorEvent = SseEvent(data = json.encodeToString(buildJsonObject {
+            put("error", buildJsonObject {
+                put("code", 500)
+                put("message", "Internal error encountered.")
+                put("status", "INTERNAL")
+            })
+        }))
+        val decoder = GoogleStreamDecoder("response-1", "gemini-3.6-flash")
+        decoder.accept(errorEvent)
+    }
+
     private fun invokeBuildRequestBody(
         messages: List<UIMessage>,
         params: TextGenerationParams,

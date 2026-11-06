@@ -49,9 +49,11 @@ import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete02
 import me.rerere.hugeicons.stroke.FileImport
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.datastore.TokenUsageStyle
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -59,6 +61,7 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupValue
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceButtons
+import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceLabel
 import me.rerere.rikkahub.ui.components.ui.switchItem
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -188,6 +191,29 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_display_page_show_token_usage_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_display_page_show_token_usage_title)) },
                     )
+                    if (displaySetting.showTokenUsage) {
+                        formItem(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_token_usage_style_title)) },
+                            supportingContent = { Text(stringResource(R.string.setting_display_page_token_usage_style_desc)) },
+                        ) {
+                            ConnectedChoiceButtons(
+                                options = TokenUsageStyle.entries,
+                                selected = displaySetting.tokenUsageStyle,
+                                onSelect = { style ->
+                                    updateDisplaySetting(displaySetting.copy(tokenUsageStyle = style))
+                                },
+                            ) { style, isSelected ->
+                                ConnectedChoiceLabel(
+                                    text = when (style) {
+                                        TokenUsageStyle.COMPACT -> stringResource(R.string.setting_display_page_token_usage_style_compact)
+                                        TokenUsageStyle.DETAILED -> stringResource(R.string.setting_display_page_token_usage_style_detailed)
+                                    },
+                                    selected = isSelected,
+                                    icon = HugeIcons.Tick01,
+                                )
+                            }
+                        }
+                    }
                     switchItem(
                         checked = displaySetting.showWordCount,
                         onCheckedChange = { updateDisplaySetting(displaySetting.copy(showWordCount = it)) },

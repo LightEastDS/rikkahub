@@ -19,6 +19,24 @@ import java.util.UUID
  * 保留原预设的所有未知字段；原始 JSON 仍单独保存在 original_json，用于恢复默认。
  */
 object StPresetDocumentEditor {
+    fun updateMetadata(
+        rawJson: String,
+        name: String,
+        description: String,
+    ): String {
+        val root = runCatching { JsonInstant.parseToJsonElement(rawJson).jsonObject }.getOrNull()
+            ?: return rawJson
+        val newRoot = JsonObject(
+            root.toMutableMap().apply {
+                put("name", JsonPrimitive(name))
+                put("description", JsonPrimitive(description))
+            }
+        )
+        return runCatching {
+            JsonInstant.encodeToString(JsonObject.serializer(), newRoot)
+        }.getOrDefault(rawJson)
+    }
+
     fun updatePrompt(
         rawJson: String,
         identifier: String,

@@ -133,6 +133,15 @@ enum class ConversationSortOrder {
 }
 
 @Serializable
+enum class TokenUsageStyle {
+    @SerialName("compact")
+    COMPACT,
+
+    @SerialName("detailed")
+    DETAILED,
+}
+
+@Serializable
 data class DisplaySetting(
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
@@ -145,6 +154,7 @@ data class DisplaySetting(
     val showModelName: Boolean = true,
     val showDateTimeInMessage: Boolean = false,
     val showTokenUsage: Boolean = true,
+    val tokenUsageStyle: TokenUsageStyle = TokenUsageStyle.COMPACT,
     val showWordCount: Boolean = false,
     val showFloor: Boolean = true,
     val showThinkingContent: Boolean = true,

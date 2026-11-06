@@ -82,6 +82,44 @@ class ThinkTagTransformerTest {
         assertEquals(now, finishedResult.parts.filterIsInstance<UIMessagePart.Reasoning>().single().finishedAt)
     }
 
+    @Test
+    fun `dream_think closed by mismatched think tag should not swallow body text`() {
+        val result = transform("<dream_think>剧情规划</think>\n<dream_plot><dream_body>正文内容</dream_body></dream_plot>")
+
+        assertEquals("剧情规划", result.parts.filterIsInstance<UIMessagePart.Reasoning>().single().reasoning)
+        assertEquals(
+            "<dream_plot><dream_body>正文内容</dream_body></dream_plot>",
+            result.parts.filterIsInstance<UIMessagePart.Text>().single().text,
+        )
+    }
+
+    @Test
+    fun `unclosed dream_think before dream_plot should stop at dream_plot boundary`() {
+        val result = transform("<dream_think>剧情规划\n<dream_plot><dream_body>正文内容</dream_body></dream_plot>")
+
+        assertEquals("剧情规划", result.parts.filterIsInstance<UIMessagePart.Reasoning>().single().reasoning)
+        assertEquals(
+            "<dream_plot><dream_body>正文内容</dream_body></dream_plot>",
+            result.parts.filterIsInstance<UIMessagePart.Text>().single().text,
+        )
+    }
+
+    @Test
+    fun `native reasoning still extracts dream_think tag from text`() {
+        val nativeReasoning = UIMessagePart.Reasoning("native thought", finishedAt = now)
+        val text = UIMessagePart.Text("<dream_think>预设思考</dream_think>\n正文内容")
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(nativeReasoning, text),
+        )
+
+        val result = listOf(message).transformThinkTags(now, generationFinished = true).single()
+
+        val reasonings = result.parts.filterIsInstance<UIMessagePart.Reasoning>()
+        assertEquals(listOf("native thought", "预设思考"), reasonings.map { it.reasoning })
+        assertEquals("正文内容", result.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+    }
+
     private fun transform(text: String): UIMessage {
         val message = UIMessage.assistant(text)
         return listOf(message).transformThinkTags(now, generationFinished = true).single()

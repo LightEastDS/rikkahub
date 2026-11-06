@@ -20,6 +20,11 @@ class ConversationCheckpointRepository(
     suspend fun saveCheckpoint(checkpoint: ConversationCheckpointEntity) =
         dao.insert(checkpoint)
 
+    suspend fun updateSummary(checkpointId: String, summaryContent: String) {
+        val compressedTokens = (summaryContent.length * 0.75).toInt().coerceAtLeast(1)
+        dao.updateSummary(checkpointId, summaryContent, compressedTokens)
+    }
+
     suspend fun clear(conversationId: Uuid) =
         dao.deleteByConversationId(conversationId.toString())
 
