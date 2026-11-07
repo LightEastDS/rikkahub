@@ -248,6 +248,18 @@ internal fun AssistantBasicContent(
                 supportingContent = { Text(stringResource(R.string.assistant_page_stream_output_desc)) },
                 headlineContent = { Text(stringResource(R.string.assistant_page_stream_output)) },
             )
+            switchItem(
+                checked = assistant.geminiToolOutput,
+                onCheckedChange = {
+                    onUpdate(
+                        assistant.copy(
+                            geminiToolOutput = it
+                        )
+                    )
+                },
+                supportingContent = { Text(stringResource(R.string.assistant_page_gemini_tool_output_desc)) },
+                headlineContent = { Text(stringResource(R.string.assistant_page_gemini_tool_output)) },
+            )
         }
 
         CardGroup {

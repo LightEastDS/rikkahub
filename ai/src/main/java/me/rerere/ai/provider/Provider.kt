@@ -70,6 +70,8 @@ data class TextGenerationParams(
     val topP: Float? = null,
     val maxTokens: Int? = null,
     val tools: List<Tool> = emptyList(),
+    val forceToolUse: Boolean = false,
+    val forcedToolName: String? = null,
     val reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),

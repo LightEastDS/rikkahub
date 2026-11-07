@@ -197,6 +197,20 @@ fun ChatMessage(
                 model = model,
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
+                onUpdateTool = { updatedTool ->
+                    val updatedParts = message.parts.map { part ->
+                        if (part is UIMessagePart.Tool && part.toolCallId == updatedTool.toolCallId) {
+                            updatedTool
+                        } else {
+                            part
+                        }
+                    }
+                    val updatedMessage = message.copy(parts = updatedParts)
+                    val updatedMessages = node.messages.toMutableList().also {
+                        it[node.selectIndex] = updatedMessage
+                    }
+                    onUpdate(node.copy(messages = updatedMessages))
+                },
                 onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
             )
 
@@ -313,6 +327,7 @@ private fun MessagePartsBlock(
     loading: Boolean,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onUpdateTool: ((UIMessagePart.Tool) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -394,6 +409,7 @@ private fun MessagePartsBlock(
                                         assistant = assistant,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
+                                        onUpdateTool = onUpdateTool,
                                     )
                                 }
                             }

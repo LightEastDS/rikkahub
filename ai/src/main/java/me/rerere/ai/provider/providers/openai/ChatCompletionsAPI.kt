@@ -435,6 +435,19 @@ class ChatCompletionsAPI(
                         })
                     }
                 }
+                if (params.forceToolUse) {
+                    val targetTool = params.forcedToolName?.takeIf { name -> params.tools.any { it.name == name } }
+                    if (targetTool != null) {
+                        put("tool_choice", buildJsonObject {
+                            put("type", "function")
+                            put("function", buildJsonObject {
+                                put("name", targetTool)
+                            })
+                        })
+                    } else {
+                        put("tool_choice", "required")
+                    }
+                }
             }
         }.mergeCustomBody(params.customBody)
     }

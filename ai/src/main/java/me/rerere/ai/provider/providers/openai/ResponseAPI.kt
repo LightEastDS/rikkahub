@@ -331,6 +331,17 @@ class ResponseAPI(
                         }
                     }
                 }
+                if (useFunctionTools && params.forceToolUse) {
+                    val targetTool = params.forcedToolName?.takeIf { name -> params.tools.any { it.name == name } }
+                    if (targetTool != null) {
+                        put("tool_choice", buildJsonObject {
+                            put("type", "function")
+                            put("name", targetTool)
+                        })
+                    } else {
+                        put("tool_choice", "required")
+                    }
+                }
             }
         }.mergeCustomBody(params.customBody)
     }

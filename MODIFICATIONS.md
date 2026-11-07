@@ -310,6 +310,18 @@
      - `GoogleStreamDecoder` 新增对流内 SSE `{"error": ...}` 事件及 `promptFeedback.blockReason` 的解析与异常抛出；
      - 当 SSE 连接在未收到 `finishReason` 且无工具调用时提前断开，或以 `MALFORMED_FUNCTION_CALL` / `OTHER` / `MAX_TOKENS` 等异常状态无输出结束时，抛出异常以触发 `AgentLoop` 网络自动重试或向用户展示明确错误提示。
   9. **版本号升级**：升至 `3.1.1.9`（versionCode: 207）。
+* **v3.1.1.10**：
+  1. **支持 Gemini 模型调用创建文档工具输出（防截断/防空回）(#20)**：
+     - 自动识别 Gemini 模型（原生 Google 提供商或模型 ID 含 `gemini` 的中转渠道），支持强制模型通过 `create_document` 工具写入完整回复内容，大幅降低敏感或长篇创作内容直接文本回复时的截断与空回概率；
+     - 新增 `ToolOutputTransformer` 输出转换器，在流式生成中与生成结束时实时解析 `create_document` 工具调用的 `content` 参数（支持未闭合流式 JSON 渐进解析），无缝转换为标准 `UIMessagePart.Text` 正文气泡渲染，并与 `<dream_think>` 思考块及 ST 预设正则完全兼容；
+     - 在 `AgentLoop.finishStep` 阶段直接完成工具输出到正文的落库转换，单轮请求一步完成，无需二次工具回传请求，且在下一轮对话中自然作为标准 Assistant 历史上下文发送给 AI；
+     - 在「助手设置 → 基础设定」中新增「Gemini 工具输出 (防截断)」独立开关（默认开启）。
+  2. **修复 `/compact` 压缩后创建分支丢失压缩总结问题 (#19)**：
+     - 在 `ChatService.forkConversationAtMessage` 创建分支会话时，若分叉位置覆盖已压缩楼层区间，自动为新分支会话克隆并保存 `ConversationCheckpointEntity` 压缩摘要记录（同步适配分叉边界楼层与自动隐藏楼层列表），确保新分支完整保留压缩总结卡片与上下文注入；若在压缩起始楼层之前分叉，则自动恢复被隐藏楼层状态。
+  3. **文档预览支持一键复制与编辑保存 (#18)**：
+     - 工作区文件读取/写入工具预览弹窗（`FileContentPreview`）与工作区文件编辑器（`WorkspaceFileEditorPage`）新增「复制」与「编辑 / 保存」功能，支持直接在弹窗或编辑器中修改文档内容并同步写回工作区文件与消息记录；
+     - 修复 `MarkdownBlock` 外层误用 `SelectionContainer` 导致长按无法自由选择复制文本的问题，统一替换为适配 `BetterText` 的 `SelectableContent`。
+  4. **版本号升级**：升至 `3.1.1.10`（versionCode: 208）。
 
 
 

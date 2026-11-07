@@ -419,6 +419,16 @@ class ChatVM(
         }
     }
 
+    fun updateMessageNode(newNode: MessageNode) {
+        viewModelScope.launch {
+            try {
+                chatService.updateMessageNode(_conversationId, newNode)
+            } catch (e: Exception) {
+                Log.w(TAG, "updateMessageNode: ${e.message}")
+            }
+        }
+    }
+
     fun updateConversationSystemPrompt(systemPrompt: String?) {
         viewModelScope.launch {
             chatService.updateConversationSystemPrompt(_conversationId, systemPrompt)

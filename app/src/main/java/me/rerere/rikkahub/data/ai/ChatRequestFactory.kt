@@ -12,6 +12,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
@@ -20,6 +21,9 @@ import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.buildMemoryPrompt
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
+import me.rerere.rikkahub.data.ai.tools.GEMINI_OUTPUT_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.appendGeminiToolOutputInstruction
+import me.rerere.rikkahub.data.ai.tools.isGeminiModel
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -31,10 +35,12 @@ import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
+import me.rerere.rikkahub.data.ai.transformers.ToolOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.TransformerContext
 import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transformThinkTags
+import me.rerere.rikkahub.data.ai.transformers.transformToolOutputs
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.datastore.Settings
@@ -84,6 +90,7 @@ class ChatTurnContext(
     val stPreset: StPreset? = null,
     val checkpoint: ConversationCheckpointEntity? = null,
     val milestoneMessageIds: Set<String> = emptySet(),
+    val useGeminiToolOutput: Boolean = false,
 )
 
 /** 把会话变成发给模型的请求：系统提示词、上下文裁剪、输入输出转换都在这里 */
@@ -119,7 +126,9 @@ class ChatRequestFactory(
         templateTransformer,
     )
 
-    private val outputTransformers: List<OutputMessageTransformer> = listOf(        ThinkTagTransformer,
+    private val outputTransformers: List<OutputMessageTransformer> = listOf(
+        ToolOutputTransformer,
+        ThinkTagTransformer,
         Base64ImageToLocalFileTransformer,
         RegexOutputTransformer,
     )
@@ -128,9 +137,15 @@ class ChatRequestFactory(
     suspend fun createContext(settings: Settings, conversation: Conversation): ChatTurnContext {
         // 模型、思考级别、搜索、工具等以会话上固定的配置为准
         val assistant = settings.getAssistantOf(conversation)
-        val model = settings.getChatModelOf(conversation)
+        val rawModel = settings.getChatModelOf(conversation)
             ?: throw IllegalStateException("No chat model selected")
-        val provider = model.findProvider(settings.providers) ?: error("Provider not found")
+        val provider = rawModel.findProvider(settings.providers) ?: error("Provider not found")
+        val useGeminiToolOutput = assistant.geminiToolOutput && isGeminiModel(rawModel, provider)
+        val model = if (useGeminiToolOutput && !rawModel.abilities.contains(ModelAbility.TOOL)) {
+            rawModel.copy(abilities = rawModel.abilities + ModelAbility.TOOL)
+        } else {
+            rawModel
+        }
         val stPreset = assistant.stPresetId?.let { presetId ->
             runCatching { stPresetRepository.getRecord(presetId) }.getOrNull()
                 ?.takeIf { it.enabled }
@@ -158,10 +173,12 @@ class ChatRequestFactory(
                 assistant = assistant,
                 model = model,
                 workspaceCwd = conversation.workspaceCwd,
+                useGeminiToolOutput = useGeminiToolOutput,
             ),
             stPreset = stPreset,
             checkpoint = checkpoint,
             milestoneMessageIds = milestoneMessageIds,
+            useGeminiToolOutput = useGeminiToolOutput,
         )
     }
 
@@ -276,7 +293,7 @@ class ChatRequestFactory(
                 providerSetting = turn.providerSetting,
                 messages = requestMessages + UIMessage.user(compressPrompt),
                 // 助手的输出上限是给聊天回复定的，结构化摘要写不完会被截断；max_tokens 不属于请求前缀，改了不影响缓存
-                params = params.copy(maxTokens = null),
+                params = params.copy(maxTokens = null, forceToolUse = false, forcedToolName = null),
             )
         }
         val summary = result.message.compressionSummaryOrNull()
@@ -296,7 +313,10 @@ class ChatRequestFactory(
         if (preset != null) {
             return buildPresetStep(turn, preset, messages, processingStatus, generationType)
         }
-        val requestMessages = buildList {
+        val activeToolTurn = messages.lastOrNull()?.takeIf {
+            it.role == MessageRole.ASSISTANT && it.getTools().isNotEmpty()
+        }
+        val transformedMessages = buildList {
             val system = buildString {
                 val effectiveSystemPrompt =
                     if (assistant.allowConversationSystemPrompt && !turn.conversationSystemPrompt.isNullOrBlank()) {
@@ -346,12 +366,27 @@ class ChatRequestFactory(
             processingStatus = processingStatus,
             workspaceCwd = turn.workspaceCwd,
         )
+        val requestMessages = if (turn.useGeminiToolOutput) {
+            appendGeminiToolOutputInstruction(transformedMessages)
+        } else {
+            transformedMessages
+        }
+        val forcedToolName = if (turn.useGeminiToolOutput) {
+            GEMINI_OUTPUT_TOOL_NAME.takeIf {
+                turn.tools.none { t -> t.name != GEMINI_OUTPUT_TOOL_NAME && t.name != "get_time_info" } ||
+                    activeToolTurn != null
+            }
+        } else {
+            null
+        }
         val params = TextGenerationParams(
             model = turn.model,
             temperature = assistant.temperature,
             topP = assistant.topP,
             maxTokens = assistant.maxTokens,
             tools = turn.tools,
+            forceToolUse = turn.useGeminiToolOutput,
+            forcedToolName = forcedToolName,
             reasoningLevel = assistant.reasoningLevel,
             customHeaders = buildList {
                 addAll(assistant.customHeaders)
@@ -522,12 +557,28 @@ class ChatRequestFactory(
         stVariableRepository.save(scopeId, variables)
         stVariableRepository.saveGlobal(globalVariables)
 
+        val finalMessages = if (turn.useGeminiToolOutput) {
+            appendGeminiToolOutputInstruction(assembly.messages)
+        } else {
+            assembly.messages
+        }
+        val forcedToolName = if (turn.useGeminiToolOutput) {
+            GEMINI_OUTPUT_TOOL_NAME.takeIf {
+                turn.tools.none { t -> t.name != GEMINI_OUTPUT_TOOL_NAME && t.name != "get_time_info" } ||
+                    activeToolTurn != null
+            }
+        } else {
+            null
+        }
+
         val params = TextGenerationParams(
             model = turn.model,
             temperature = assistant.temperature ?: preset.settings.temperature,
             topP = assistant.topP ?: preset.settings.topP,
             maxTokens = assistant.maxTokens ?: preset.settings.maxTokens,
             tools = turn.tools,
+            forceToolUse = turn.useGeminiToolOutput,
+            forcedToolName = forcedToolName,
             reasoningLevel = assistant.reasoningLevel,
             customHeaders = buildList {
                 addAll(assistant.customHeaders)
@@ -539,7 +590,7 @@ class ChatRequestFactory(
             },
             sessionId = turn.conversationId.toString(),
         )
-        return StepRequest(assembly.messages, params)
+        return StepRequest(finalMessages, params)
     }
 
     private fun logAssemblyReport(preset: StPreset, report: StAssemblyReport) {
@@ -570,8 +621,11 @@ private fun StPreset.hasEnabledMarker(identifier: String): Boolean {
  * 压缩请求不经过输出转换器，正文开头的 <think> 思考内容也要在这里剥掉，否则会存进摘要。
  */
 internal fun UIMessage.compressionSummaryOrNull(): String? {
-    if (getTools().isNotEmpty()) return null
-    return listOf(this)
+    val normalized = listOf(this)
+        .transformToolOutputs(generationFinished = true)
+        .single()
+    if (normalized.getTools().isNotEmpty()) return null
+    return listOf(normalized)
         .transformThinkTags(now = Clock.System.now(), generationFinished = true)
         .single()
         .toText()

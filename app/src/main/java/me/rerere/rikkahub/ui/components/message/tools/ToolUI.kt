@@ -48,6 +48,8 @@ data class ToolUIContext(
     val loading: Boolean,
     /** 发起该工具调用的助手, 拿不到时为 null */
     val assistant: Assistant? = null,
+    /** 修改工具调用内容后的写回回调 */
+    val onUpdateTool: ((UIMessagePart.Tool) -> Unit)? = null,
 )
 
 /**

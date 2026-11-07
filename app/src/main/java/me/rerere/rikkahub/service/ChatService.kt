@@ -57,6 +57,7 @@ import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.bindConfig
 import me.rerere.rikkahub.data.model.cancelInterruptedTools
 import me.rerere.rikkahub.data.model.deleteMessage
@@ -1234,11 +1235,55 @@ class ChatService(
     ): Conversation {
         val source = withLoadedSession(conversationId) { it.state.value }
         val existingTitles = conversationRepo.getTitlesOfAssistant(source.assistantId)
-        val fork = source.fork(messageId, existingTitles, copyFile = ::copyChatFile)
+        val rawFork = source.fork(messageId, existingTitles, copyFile = ::copyChatFile)
             ?: throw NotFoundException("Message not found")
+        val latestCheckpoint = checkpointRepository.getLatest(conversationId)
+        val fork = if (latestCheckpoint != null && rawFork.messageNodes.size < latestCheckpoint.startFloor) {
+            val autoHiddenIndices = latestCheckpoint.autoHiddenFloors
+                .split(",")
+                .mapNotNull { it.trim().toIntOrNull()?.minus(1) }
+                .toSet()
+            if (autoHiddenIndices.isNotEmpty()) {
+                rawFork.copy(
+                    messageNodes = rawFork.messageNodes.mapIndexed { idx, node ->
+                        if (idx in autoHiddenIndices) {
+                            node.copy(messages = node.messages.map { it.copy(isHidden = false) })
+                        } else node
+                    }
+                )
+            } else rawFork
+        } else rawFork
         // 新会话直接落库，打开时再从数据库加载
         val forkConversation = conversationStore.prepareWrite()(fork)
         conversationRepo.insertConversation(forkConversation)
+        if (latestCheckpoint != null && forkConversation.messageNodes.size >= latestCheckpoint.startFloor) {
+            val newBoundaryFloor = latestCheckpoint.boundaryFloor.coerceAtMost(forkConversation.messageNodes.size)
+            val newBoundaryNodeId = forkConversation.messageNodes
+                .getOrNull(newBoundaryFloor - 1)
+                ?.currentMessage
+                ?.id
+                ?.toString()
+                ?: latestCheckpoint.boundaryNodeId
+            val newAutoHiddenFloors = if (latestCheckpoint.autoHiddenFloors.isNotBlank()) {
+                latestCheckpoint.autoHiddenFloors
+                    .split(",")
+                    .mapNotNull { it.trim().toIntOrNull() }
+                    .filter { it <= forkConversation.messageNodes.size }
+                    .joinToString(",")
+            } else {
+                ""
+            }
+            checkpointRepository.saveCheckpoint(
+                latestCheckpoint.copy(
+                    id = Uuid.random().toString(),
+                    conversationId = forkConversation.id.toString(),
+                    boundaryFloor = newBoundaryFloor,
+                    boundaryNodeId = newBoundaryNodeId,
+                    autoHiddenFloors = newAutoHiddenFloors,
+                    createdAt = System.currentTimeMillis(),
+                )
+            )
+        }
         memoryConsolidationScheduler.onConversationForked(forkConversation)
         return forkConversation
     }
@@ -1259,6 +1304,28 @@ class ChatService(
             }
             if (targetNode.selectIndex == selectIndex) return@mutate conversation
             conversation.selectBranch(nodeId, selectIndex)
+        }
+    }
+
+    suspend fun updateMessageNode(
+        conversationId: Uuid,
+        newNode: MessageNode
+    ) {
+        mutate(conversationId) { conversation ->
+            val targetIndex = conversation.messageNodes.indexOfFirst { it.id == newNode.id }
+            if (targetIndex == -1) return@mutate conversation
+            val targetNode = conversation.messageNodes[targetIndex]
+            val validSelectIndex = newNode.selectIndex.coerceIn(newNode.messages.indices)
+            val updatedNode = newNode.copy(
+                selectIndex = validSelectIndex,
+                isFavorite = targetNode.isFavorite,
+            )
+            if (updatedNode == targetNode) return@mutate conversation
+            conversation.copy(
+                messageNodes = conversation.messageNodes.toMutableList().also {
+                    it[targetIndex] = updatedNode
+                }
+            )
         }
     }
 

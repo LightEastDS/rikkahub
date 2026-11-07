@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
+import android.content.ClipData
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +16,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -37,6 +37,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,6 +50,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.LocalWorkspaceId
@@ -63,7 +67,7 @@ private val WEB_PREVIEW_EXTENSIONS = setOf("html", "htm", "svg")
 /**
  * 工作区文本文件编辑/预览页.
  *
- * FILES 区文件可编辑并保存; LINUX (rootfs) 区文件仅只读预览 (readOnly), 避免误改系统文件.
+ * 支持查看、复制、编辑并保存工作区文件 (包括 FILES 区与 LINUX 区).
  */
 @Composable
 fun WorkspaceFileEditorPage(
@@ -74,8 +78,10 @@ fun WorkspaceFileEditorPage(
     val repository = koinInject<WorkspaceRepository>()
     val toaster = LocalToaster.current
     val settings = LocalSettings.current
+    val context = LocalContext.current
+    val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    val editable = area == WorkspaceStorageArea.FILES
+    val editable = true
     val fileName = path.substringAfterLast('/').ifBlank { path }
     val extension = fileName.substringAfterLast('.', "").lowercase()
     val isMarkdown = extension in MARKDOWN_EXTENSIONS
@@ -127,27 +133,52 @@ fun WorkspaceFileEditorPage(
                                 onClick = { autoWrap = !autoWrap },
                                 label = { Text(stringResource(R.string.workspace_editor_auto_wrap)) },
                             )
+                            TextButton(
+                                onClick = {
+                                    val contentToCopy = textState.text.toString()
+                                    scope.launch {
+                                        clipboard.setClipEntry(
+                                            ClipEntry(ClipData.newPlainText(fileName, contentToCopy))
+                                        )
+                                        toaster.show(
+                                            context.getString(R.string.copied_to_clipboard),
+                                            type = ToastType.Success,
+                                        )
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.common_copy))
+                            }
                             if (supportsPreview) {
                                 TextButton(onClick = { showPreview = !showPreview }) {
                                     Text(
-                                        if (showPreview) stringResource(R.string.workspace_editor_source)
+                                        if (showPreview) stringResource(R.string.common_edit)
                                         else stringResource(R.string.workspace_editor_preview)
                                     )
                                 }
                             }
-                            if (editable) {
+                            if (editable && !showPreview) {
                                 TextButton(
                                     onClick = {
                                         if (saving) return@TextButton
                                         saving = true
                                         scope.launch {
                                             runCatching {
-                                                repository.writeText(
-                                                    id = id,
-                                                    path = path,
-                                                    text = textState.text.toString(),
-                                                    overwrite = true,
-                                                )
+                                                val newText = textState.text.toString()
+                                                when (area) {
+                                                    WorkspaceStorageArea.FILES -> repository.writeText(
+                                                        id = id,
+                                                        path = path,
+                                                        text = newText,
+                                                        overwrite = true,
+                                                    )
+                                                    WorkspaceStorageArea.LINUX -> repository.writeAbsoluteText(
+                                                        id = id,
+                                                        path = "/${path.trimStart('/')}",
+                                                        text = newText,
+                                                        overwrite = true,
+                                                    )
+                                                }
                                             }.onSuccess {
                                                 toaster.show("已保存", type = ToastType.Success)
                                             }.onFailure {
@@ -203,7 +234,7 @@ fun WorkspaceFileEditorPage(
                     LocalWorkspaceId provides id,
                     LocalSettings provides effectiveSettings,
                 ) {
-                    SelectionContainer {
+                    SelectableContent {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()

@@ -1,38 +1,52 @@
 package me.rerere.rikkahub.ui.components.message.tools
 
+import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.ui.DiffMetadata
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.rikkahub.ui.components.richtext.CodeHighlightText
@@ -43,16 +57,24 @@ import me.rerere.hugeicons.stroke.FileAdd
 import me.rerere.hugeicons.stroke.FileEdit
 import me.rerere.hugeicons.stroke.FileView
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.modifier.shimmer
+import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.ui.richtext.DiffAddedColor
 import me.rerere.ui.richtext.DiffRemovedColor
 import me.rerere.ui.richtext.DiffView
 import me.rerere.ui.richtext.parseDiffStats
+import me.rerere.ui.toast.ToastType
+import me.rerere.workspace.WorkspaceStorageArea
+import org.koin.compose.koinInject
 
 /**
  * 工作空间编辑文件: 摘要显示增删统计与精简 diff, 详情为完整 diff view
@@ -196,7 +218,21 @@ object ReadFileToolUI : ToolUIRenderer {
             DefaultToolPreview(context = context)
             return
         }
-        FileContentPreview(path = context.arguments.getStringContent("path"), code = text)
+        FileContentPreview(
+            path = context.arguments.getStringContent("path"),
+            code = text,
+            workspaceId = context.assistant?.workspaceId?.toString(),
+            onSaveCode = { newText ->
+                val currentObj = context.content?.jsonObjectOrNull
+                if (currentObj != null && context.onUpdateTool != null) {
+                    val updatedJson = JsonObject(currentObj + ("text" to JsonPrimitive(newText)))
+                    val updatedOutput = listOf(
+                        UIMessagePart.Text(JsonInstant.encodeToString(JsonObject.serializer(), updatedJson))
+                    )
+                    context.onUpdateTool.invoke(context.tool.copy(output = updatedOutput))
+                }
+            },
+        )
     }
 }
 
@@ -236,7 +272,20 @@ object WriteFileToolUI : ToolUIRenderer {
             DefaultToolPreview(context = context)
             return
         }
-        FileContentPreview(path = context.arguments.getStringContent("path"), code = text)
+        FileContentPreview(
+            path = context.arguments.getStringContent("path"),
+            code = text,
+            workspaceId = context.assistant?.workspaceId?.toString(),
+            onSaveCode = { newText ->
+                val currentObj = context.arguments.jsonObjectOrNull
+                if (currentObj != null && context.onUpdateTool != null) {
+                    val updatedJson = JsonObject(currentObj + ("text" to JsonPrimitive(newText)))
+                    context.onUpdateTool.invoke(
+                        context.tool.copy(input = JsonInstant.encodeToString(JsonObject.serializer(), updatedJson))
+                    )
+                }
+            },
+        )
     }
 }
 
@@ -266,10 +315,41 @@ private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
     }
 }
 
-/** BottomSheet 详情: 文件路径 + 按扩展名语法高亮的完整内容（支持 Markdown 渲染预览与自动换行开关） */
+/** BottomSheet 详情: 文件路径 + 按扩展名语法高亮的完整内容（支持复制、编辑保存、Markdown 渲染预览与自动换行开关） */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FileContentPreview(path: String?, code: String) {
+private fun FileContentPreview(
+    path: String?,
+    code: String,
+    workspaceId: String? = null,
+    onSaveCode: ((String) -> Unit)? = null,
+) {
     val settings = LocalSettings.current
+    val context = LocalContext.current
+    val clipboard = LocalClipboard.current
+    val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
+    val workspaceRepository = koinInject<WorkspaceRepository>()
+
+    var currentCode by remember(code) { mutableStateOf(code) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editText by remember(code) { mutableStateOf(code) }
+    var saving by remember { mutableStateOf(false) }
+
+    LaunchedEffect(workspaceId, path) {
+        if (!workspaceId.isNullOrBlank() && !path.isNullOrBlank()) {
+            runCatching {
+                val (area, targetPath) = workspaceRepository.resolveEditorTarget(workspaceId, path)
+                workspaceRepository.readTextForPreview(workspaceId, area, targetPath)
+            }.onSuccess { diskContent ->
+                currentCode = diskContent
+                if (!isEditing) {
+                    editText = diskContent
+                }
+            }
+        }
+    }
+
     val language = remember(path) { languageOf(path) }
     val isMarkdown = language == "markdown"
     var renderMarkdown by remember(isMarkdown) { mutableStateOf(isMarkdown) }
@@ -283,54 +363,152 @@ private fun FileContentPreview(path: String?, code: String) {
     CompositionLocalProvider(LocalSettings provides effectiveSettings) {
         Column(
             modifier = Modifier
-                .fillMaxHeight(0.8f)
+                .fillMaxHeight(0.85f)
                 .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .imePadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
+            Text(
+                text = path ?: stringResource(R.string.tool_ui_file),
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    text = path ?: stringResource(R.string.tool_ui_file),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
                 FilterChip(
-                    selected = autoWrap,
-                    onClick = { autoWrap = !autoWrap },
-                    label = { Text(stringResource(R.string.workspace_editor_auto_wrap)) },
+                    selected = false,
+                    onClick = {
+                        val textToCopy = if (isEditing) editText else currentCode
+                        scope.launch {
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("file", textToCopy)))
+                            toaster.show(context.getString(R.string.copied_to_clipboard), type = ToastType.Success)
+                        }
+                    },
+                    label = { Text(stringResource(R.string.common_copy)) },
                 )
-                if (isMarkdown) {
+                if (!isEditing) {
                     FilterChip(
-                        selected = renderMarkdown,
-                        onClick = { renderMarkdown = !renderMarkdown },
-                        label = {
-                            Text(
-                                if (renderMarkdown) stringResource(R.string.workspace_editor_preview)
-                                else stringResource(R.string.workspace_editor_source)
-                            )
+                        selected = false,
+                        onClick = {
+                            editText = currentCode
+                            isEditing = true
                         },
+                        label = { Text(stringResource(R.string.common_edit)) },
+                    )
+                    FilterChip(
+                        selected = autoWrap,
+                        onClick = { autoWrap = !autoWrap },
+                        label = { Text(stringResource(R.string.workspace_editor_auto_wrap)) },
+                    )
+                    if (isMarkdown) {
+                        FilterChip(
+                            selected = renderMarkdown,
+                            onClick = { renderMarkdown = !renderMarkdown },
+                            label = {
+                                Text(
+                                    if (renderMarkdown) stringResource(R.string.workspace_editor_preview)
+                                    else stringResource(R.string.workspace_editor_source)
+                                )
+                            },
+                        )
+                    }
+                } else {
+                    FilterChip(
+                        selected = true,
+                        enabled = !saving,
+                        onClick = {
+                            if (saving) return@FilterChip
+                            saving = true
+                            scope.launch {
+                                val newText = editText
+                                val writeResult = if (!workspaceId.isNullOrBlank() && !path.isNullOrBlank()) {
+                                    runCatching {
+                                        val (area, targetPath) = workspaceRepository.resolveEditorTarget(workspaceId, path)
+                                        when (area) {
+                                            WorkspaceStorageArea.FILES -> workspaceRepository.writeText(
+                                                id = workspaceId,
+                                                path = targetPath,
+                                                text = newText,
+                                                overwrite = true,
+                                            )
+                                            WorkspaceStorageArea.LINUX -> workspaceRepository.writeAbsoluteText(
+                                                id = workspaceId,
+                                                path = if (path.startsWith("/")) path else "/$targetPath",
+                                                text = newText,
+                                                overwrite = true,
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    Result.success(Unit)
+                                }
+                                writeResult.onSuccess {
+                                    currentCode = newText
+                                    onSaveCode?.invoke(newText)
+                                    isEditing = false
+                                    toaster.show(context.getString(R.string.common_save), type = ToastType.Success)
+                                }.onFailure { err ->
+                                    // 即使工作区未就绪或文件不存在，也允许更新消息内嵌文档内容
+                                    if (onSaveCode != null) {
+                                        currentCode = newText
+                                        onSaveCode.invoke(newText)
+                                        isEditing = false
+                                        toaster.show(context.getString(R.string.common_save), type = ToastType.Success)
+                                    } else {
+                                        toaster.show(err.message ?: "保存失败", type = ToastType.Error)
+                                    }
+                                }
+                                saving = false
+                            }
+                        },
+                        label = { Text(stringResource(R.string.common_save)) },
+                    )
+                    FilterChip(
+                        selected = false,
+                        enabled = !saving,
+                        onClick = {
+                            editText = currentCode
+                            isEditing = false
+                        },
+                        label = { Text(stringResource(R.string.common_cancel)) },
                     )
                 }
             }
-            if (isMarkdown && renderMarkdown) {
-                SelectionContainer {
-                    MarkdownBlock(
-                        content = code,
+            when {
+                isEditing -> {
+                    OutlinedTextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 10,
+                        textStyle = LocalTextStyle.current.copy(
+                            fontFamily = JetbrainsMono,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                        ),
+                    )
+                }
+                isMarkdown && renderMarkdown -> {
+                    SelectableContent {
+                        MarkdownBlock(
+                            content = currentCode,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                else -> {
+                    HighlightCodeBlock(
+                        code = currentCode,
+                        language = language,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-            } else {
-                HighlightCodeBlock(
-                    code = code,
-                    language = language,
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
         }
     }

@@ -75,6 +75,26 @@ class GoogleToolCombinationTest {
     }
 
     @Test
+    fun `forceToolUse configures functionCallingConfig mode ANY with allowedFunctionNames`() {
+        val body = invokeBuildRequestBody(
+            messages = listOf(UIMessage.user("create document response")),
+            params = TextGenerationParams(
+                model = toolModel(),
+                tools = listOf(testTool()),
+                forceToolUse = true,
+                forcedToolName = "save_weather",
+            ),
+        )
+
+        val functionCallingConfig = body["toolConfig"]!!.jsonObject["functionCallingConfig"]!!.jsonObject
+        assertEquals("ANY", functionCallingConfig["mode"]!!.jsonPrimitive.content)
+        assertEquals(
+            listOf("save_weather"),
+            functionCallingConfig["allowedFunctionNames"]!!.jsonArray.map { it.jsonPrimitive.content },
+        )
+    }
+
+    @Test
     fun `server tool context and function id survive streaming and history replay`() {
         val toolCallPart = buildJsonObject {
             put("thoughtSignature", "search-call-signature")

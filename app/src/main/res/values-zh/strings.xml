@@ -123,6 +123,8 @@
   <string name="assistant_page_select_from_gallery">从相册选择</string>
   <string name="assistant_page_stream_output">流式输出</string>
   <string name="assistant_page_stream_output_desc">是否启用消息的流式输出</string>
+  <string name="assistant_page_gemini_tool_output">Gemini 工具输出 (防截断)</string>
+  <string name="assistant_page_gemini_tool_output_desc">使用 Gemini 模型时默认通过创建文档工具输出回复，大幅降低截断与空回概率</string>
   <string name="assistant_page_strict">严谨</string>
   <string name="assistant_page_system_prompt">系统提示词</string>
   <string name="assistant_page_tab_basic">基础设定</string>
@@ -1224,6 +1226,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="common_install">安装</string>
   <string name="common_cancel">取消</string>
   <string name="common_save">保存</string>
+  <string name="common_copy">复制</string>
+  <string name="common_edit">编辑</string>
   <string name="common_delete">删除</string>
   <string name="common_rename">重命名</string>
   <string name="common_export">导出</string>

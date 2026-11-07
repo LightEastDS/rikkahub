@@ -516,7 +516,7 @@ private fun ChatPageContent(
                     vm.updateCheckpointSummary(checkpointId, newSummary)
                 },
                 onUpdateMessage = { newNode ->
-                    vm.selectMessageNode(newNode.id, newNode.selectIndex)
+                    vm.updateMessageNode(newNode)
                 },
                 onClickSuggestion = { suggestion ->
                     inputState.editingMessage = null

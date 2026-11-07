@@ -500,7 +500,18 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 }
             }
         }
-        if (useFunctionTools && useBuiltInTools) {
+        if (useFunctionTools && params.forceToolUse && !useBuiltInTools) {
+            put("toolConfig", buildJsonObject {
+                put("functionCallingConfig", buildJsonObject {
+                    put("mode", "ANY")
+                    params.forcedToolName?.takeIf { name -> params.tools.any { it.name == name } }?.let { name ->
+                        putJsonArray("allowedFunctionNames") {
+                            add(JsonPrimitive(name))
+                        }
+                    }
+                })
+            })
+        } else if (useFunctionTools && useBuiltInTools) {
             put("toolConfig", buildJsonObject {
                 put("includeServerSideToolInvocations", true)
             })
