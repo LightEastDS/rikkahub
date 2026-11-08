@@ -324,22 +324,20 @@
   4. **版本号升级**：升至 `3.1.1.10`（versionCode: 208）。
 * **v3.1.2.1**：
   1. **同步官方上游 `v3.1.2` 更新**：
-     - 合并官方上游 `v3.1.2`（`fe5a28f9`）全部新特性与修复，保留所有本地定制增强与去商业化净化逻辑；
-  2. **版本号升级**：升至 `3.1.2.1`（versionCode: 209）。
-* **v3.1.2.2**：
-  1. **修复网关超时 504 等 HTML 错误页面报错解析异常 (#21)**：
+     - 合并官方上游 `v3.1.2`（`fe5a28f9`）全部新特性与修复，保留所有本地定制增强与去商业化净化逻辑。
+  2. **修复网关超时 504 等 HTML 错误页面报错解析异常 (#21)**：
      - 修复当反代网关（OpenResty / Nginx / Cloudflare）返回 `504 Gateway Time-out`、`502 Bad Gateway` 等 HTML 错误页面时，`Json.parseToJsonElement` 将 `<html>\r\n` 误解析为非引号 Token 并在 `<head>` 处抛出 `JsonDecodingException: Expected EOF after parsing, but had < instead at offset 9`、从而吞掉真实 HTTP 状态码与错误信息的问题；
      - 在 `ErrorParser` 中新增 HTML 错误页智能提取逻辑，自动识别 `<title>`、`<h1>` 与网关标识（如 `[openresty]`、`[nginx]`）并附带可读中文原因提示，同时全量覆盖同步/流式请求响应解析。
-  2. **新增「以文件方式发送输入」功能 (#22)**：
+  3. **新增「以文件方式发送输入」功能 (#22)**：
      - 在「助手设置 → 基础设定」中新增「以文件方式发送输入」独立开关（默认关闭）；
      - 开启后，发送请求时自动将真实用户文本消息封装为 `user_input.txt` 文件附件（Google Gemini 采用 `inlineData` `text/plain` Base64、Claude 采用原生 `document` 块、OpenAI 等采用 `<UploadFile>` 文档块）并附带文件读取指令，同时在 ST 预设下自动对 `{{lastUserMessage}}` 宏做掩码保护（保留世界书关键词匹配能力），大幅降低输入端敏感审查拦截与空回概率。
-  3. **将工具输出防截断拓展至全部模型 (#23)**：
+  4. **将工具输出防截断拓展至全部模型 (#23)**：
      - 将「工具输出 (防截断)」（`create_document` 文档工具输出）从仅限 Gemini 模型拓展至所有非生图模型；
      - 针对 Claude 思考模式、DeepSeek Reasoner 等不支持同时启用 `thinking` 与强制 `tool_choice` 的模型，自动采用注册 `create_document` 工具定义 + 尾部强制指令的兼容模式，避免触发 HTTP 400 报错。
-  4. **修复 `/compact` 压缩后消息概览与楼层列表无法跳转问题 (#24)**：
+  5. **修复 `/compact` 压缩后消息概览与楼层列表无法跳转问题 (#24)**：
      - 新增 `messageIndexToLazyIndex` 与 `lazyIndexToMessageIndex` 双向索引映射，解决启用上下文压缩卡片后 `LazyColumn` 条目索引与 `conversation.messageNodes` 真实消息索引偏移不一致导致点击概览卡片无法跳转或跳错楼层的问题；
      - 当点击位于已压缩区间内的历史消息时，自动展开压缩原文并精确定位滚动至目标楼层。
-  5. **版本号升级**：升至 `3.1.2.2`（versionCode: 210）。
+  6. **版本号升级**：升至 `3.1.2.1`（versionCode: 209）。
 
 
 
