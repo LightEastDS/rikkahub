@@ -86,7 +86,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastForEachIndexed
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -952,16 +951,31 @@ private fun LorebookEditSheet(
                     }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-                    book.entries.fastForEachIndexed { index, entry ->
-                        RegexInjectionEntryCard(
-                            entry = entry,
-                            shape = cardGroupItemShape(index, book.entries.size),
-                            onEdit = { entryEditState.open(entry) },
-                            onDelete = {
-                                onEdit(book.copy(entries = book.entries - entry))
-                            }
-                        )
+                ReorderableColumn(
+                    list = book.entries,
+                    onSettle = { fromIndex, toIndex ->
+                        val entries = book.entries.toMutableList().apply {
+                            add(toIndex, removeAt(fromIndex))
+                        }
+                        onEdit(book.copy(entries = entries))
+                    },
+                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
+                ) { index, entry, isDragging ->
+                    key(entry.id) {
+                        ReorderableItem {
+                            RegexInjectionEntryCard(
+                                entry = entry,
+                                shape = cardGroupItemShape(index, book.entries.size),
+                                modifier = longPressReorder(
+                                    isDragging = isDragging,
+                                    enabled = book.entries.size > 1,
+                                ),
+                                onEdit = { entryEditState.open(entry) },
+                                onDelete = {
+                                    onEdit(book.copy(entries = book.entries - entry))
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -996,12 +1010,13 @@ private fun LorebookEditSheet(
 private fun RegexInjectionEntryCard(
     entry: PromptInjection.RegexInjection,
     shape: Shape,
+    modifier: Modifier = Modifier,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
         onClick = onEdit,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
