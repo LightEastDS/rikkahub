@@ -68,7 +68,11 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.parseHttpError
+import me.rerere.ai.util.parseJsonOrThrowHttpError
 import me.rerere.ai.util.stringSafe
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonPrimitiveOrNull
 import me.rerere.common.http.sse.newEventSource
@@ -309,11 +313,13 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+            throw parseHttpError(response, response.body?.string())
         }
 
         val bodyStr = response.body?.string() ?: ""
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+        val bodyElement = parseJsonOrThrowHttpError(bodyStr, response.code)
+        val bodyJson = bodyElement as? JsonObject ?: throw bodyElement.parseErrorDetail(response.code)
+        bodyJson["error"]?.let { throw it.parseErrorDetail(response.code) }
 
         // 从 JsonObject 中提取必要的信息
         val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
@@ -390,24 +396,13 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
-
                 t?.printStackTrace()
                 Log.e(TAG, "onFailure: ${t?.javaClass?.name} ${t?.message} / $response")
 
                 val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
-                        exception = bodyElement.parseErrorDetail()
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                } finally {
-                    close(exception)
-                }
+                val exception = parseHttpError(response = response, bodyRaw = bodyRaw, fallback = t)
+                Log.i(TAG, "Error response: $exception")
+                close(exception)
             }
 
             override fun onClosed(eventSource: EventSource) {
@@ -536,6 +531,22 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         } else {
                             add(definition)
                         }
+                    }
+                }
+                val thinkingEnabled = params.model.abilities.contains(ModelAbility.REASONING) &&
+                    params.reasoningLevel != ReasoningLevel.OFF
+                val hasBuiltInTools = params.model.tools.any { it == BuiltInTools.Search }
+                if (useFunctionTools && params.forceToolUse && !thinkingEnabled && !hasBuiltInTools) {
+                    val targetTool = params.forcedToolName?.takeIf { name -> params.tools.any { it.name == name } }
+                    if (targetTool != null) {
+                        put("tool_choice", buildJsonObject {
+                            put("type", "tool")
+                            put("name", targetTool)
+                        })
+                    } else {
+                        put("tool_choice", buildJsonObject {
+                            put("type", "any")
+                        })
                     }
                 }
             }
@@ -733,10 +744,31 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
+    @OptIn(ExperimentalEncodingApi::class)
     private fun UIMessagePart.toContentBlock(): JsonObject? = when (this) {
         is UIMessagePart.Text -> buildJsonObject {
             put("type", "text")
             put("text", text)
+        }
+
+        is UIMessagePart.Document -> {
+            if (url.startsWith("data:")) {
+                val base64Data = url.substringAfter(";base64,", "")
+                val decodedText = runCatching {
+                    Base64.decode(base64Data).decodeToString()
+                }.getOrNull()
+                if (!decodedText.isNullOrEmpty()) {
+                    buildJsonObject {
+                        put("type", "document")
+                        put("title", fileName.ifBlank { "user_input.txt" })
+                        put("source", buildJsonObject {
+                            put("type", "text")
+                            put("media_type", "text/plain")
+                            put("data", decodedText)
+                        })
+                    }
+                } else null
+            } else null
         }
 
         is UIMessagePart.Image -> buildJsonObject {

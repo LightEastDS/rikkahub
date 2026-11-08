@@ -58,6 +58,7 @@ import me.rerere.hugeicons.stroke.Wrench01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -124,6 +125,8 @@ internal fun ChatListPreview(
     listState: LazyListState,
     settings: Settings,
     hazeState: HazeState,
+    checkpoint: ConversationCheckpointEntity? = null,
+    isCheckpointExpanded: Boolean = false,
     onJumpToMessage: (Int) -> Unit,
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -141,9 +144,17 @@ internal fun ChatListPreview(
         settings.providers.flatMap { it.models }.associateBy { it.id }
     }
 
-    // 打开时的阅读位置；概览期间聊天列表不动，记一次就够
-    val currentIndex = remember { chatListState.firstVisibleItemIndex }
-    val currentRound = remember(rounds) {
+    // 打开时的阅读位置；概览期间聊天列表不动，记一次就够。
+    // 当存在上下文压缩检查点时，需要将 LazyColumn 条目索引反解为真实消息节点索引。
+    val currentIndex = remember(checkpoint, isCheckpointExpanded, conversation.messageNodes.size) {
+        lazyIndexToMessageIndex(
+            lazyIndex = chatListState.firstVisibleItemIndex,
+            messageCount = conversation.messageNodes.size,
+            checkpoint = checkpoint,
+            isCheckpointExpanded = isCheckpointExpanded,
+        )
+    }
+    val currentRound = remember(rounds, currentIndex) {
         rounds.indexOfFirst { currentIndex in it.firstIndex..it.lastIndex }
     }
     // listState 由外部持有（顶栏胶囊要读它），每次打开都重新定位：

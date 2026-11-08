@@ -23,6 +23,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.parseJsonOrThrowHttpError
 import me.rerere.common.http.jsonPrimitiveOrNull
 import java.io.IOException
 import kotlin.time.Clock
@@ -42,7 +43,7 @@ internal class GoogleStreamDecoder(
         if (finished) return DecodeResult(completed = true)
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
 
-        val element = json.parseToJsonElement(event.data)
+        val element = parseJsonOrThrowHttpError(event.data)
         val jsonData = element as? JsonObject ?: throw element.parseErrorDetail()
         jsonData["error"]?.let { throw it.parseErrorDetail() }
         val blockedReason = jsonData["promptFeedback"]?.jsonObject

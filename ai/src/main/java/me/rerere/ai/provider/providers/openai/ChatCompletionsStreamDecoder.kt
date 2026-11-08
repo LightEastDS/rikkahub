@@ -20,7 +20,10 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
+import me.rerere.ai.util.looksLikeHtml
+import me.rerere.ai.util.parseErrorBody
 import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.parseJsonOrThrowHttpError
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -39,10 +42,18 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
         if (finished) return DecodeResult(completed = true)
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
 
+        val trimmedData = event.data.trim()
+        if (looksLikeHtml(trimmedData)) {
+            throw parseErrorBody(trimmedData)
+        }
+
         val chunks = buildList {
-            event.data.trim().split("\n").filter(String::isNotBlank).forEach { line ->
+            trimmedData.split("\n").filter(String::isNotBlank).forEach { line ->
+                if (looksLikeHtml(line)) {
+                    throw parseErrorBody(line)
+                }
                 // 部分中转会在流中夹杂 `data: null` 之类的非对象行，直接跳过
-                val payload = json.parseToJsonElement(line).jsonObjectOrNull ?: return@forEach
+                val payload = parseJsonOrThrowHttpError(line).jsonObjectOrNull ?: return@forEach
                 payload["error"]?.let { throw it.parseErrorDetail() }
                 responseId = payload["id"]?.jsonPrimitive?.contentOrNull ?: responseId
                 responseModel = payload["model"]?.jsonPrimitive?.contentOrNull ?: responseModel

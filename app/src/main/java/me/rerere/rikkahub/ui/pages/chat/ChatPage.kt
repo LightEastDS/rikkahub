@@ -46,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -309,12 +310,38 @@ private fun ChatPageContent(
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val checkpoint by vm.latestCheckpoint.collectAsStateWithLifecycle()
+    var isCheckpointExpanded by rememberSaveable(checkpoint?.id) { mutableStateOf(false) }
 
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val selectionState = rememberChatSelectionState()
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     var showFilesSheet by remember { mutableStateOf(false) }
+
+    val jumpToMessage: (Int) -> Unit = { index ->
+        previewMode = false
+        val needExpand = isMessageInCompactedRange(
+            messageIndex = index,
+            messageCount = conversation.messageNodes.size,
+            checkpoint = checkpoint,
+        ) && !isCheckpointExpanded
+        val effectiveExpanded = isCheckpointExpanded || needExpand
+        if (needExpand) {
+            isCheckpointExpanded = true
+        }
+        val targetLazyIndex = messageIndexToLazyIndex(
+            messageIndex = index,
+            messageCount = conversation.messageNodes.size,
+            checkpoint = checkpoint,
+            isCheckpointExpanded = effectiveExpanded,
+        )
+        scope.launch {
+            if (needExpand) {
+                withFrameNanos { }
+            }
+            chatListState.requestScrollToItem(targetLazyIndex)
+        }
+    }
     val attachmentPickerActions = rememberChatAttachmentPickerActions(
         inputState = inputState,
         setting = setting,
@@ -529,6 +556,8 @@ private fun ChatPageContent(
                 innerPadding = innerPadding,
                 conversation = conversation,
                 checkpoint = checkpoint,
+                isCheckpointExpanded = isCheckpointExpanded,
+                onCheckpointExpandedChange = { isCheckpointExpanded = it },
                 state = chatListState,
                 previewListState = previewListState,
                 selectionState = selectionState,
@@ -584,12 +613,7 @@ private fun ChatPageContent(
                 onClearTranslation = { message ->
                     vm.clearTranslationField(message.id)
                 },
-                onJumpToMessage = { index ->
-                    previewMode = false
-                    scope.launch {
-                        chatListState.requestScrollToItem(index)
-                    }
-                },
+                onJumpToMessage = jumpToMessage,
                 onToolApproval = { toolCallId, approved, reason ->
                     vm.handleToolApproval(toolCallId, approved, reason)
                 },
@@ -683,11 +707,7 @@ private fun ChatPageContent(
                         toaster.show(msg, type = if (success) ToastType.Success else ToastType.Warning)
                     }
                 },
-                onJumpToMessage = { index ->
-                    scope.launch {
-                        chatListState.requestScrollToItem(index)
-                    }
-                }
+                onJumpToMessage = jumpToMessage,
             )
         }
     }

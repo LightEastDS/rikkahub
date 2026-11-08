@@ -53,6 +53,8 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.parseHttpError
+import me.rerere.ai.util.parseJsonOrThrowHttpError
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonArrayOrNull
@@ -92,9 +94,11 @@ internal class InteractionsAPI(
         // await() waits for the response headers; reading the body can still block.
         client.newCall(request).await().use { response ->
             if (!response.isSuccessful) {
-                throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
+                throw parseHttpError(response, response.body.string())
             }
-            val bodyJson = json.parseToJsonElement(response.body.string()).jsonObject
+            val bodyElement = parseJsonOrThrowHttpError(response.body.string(), response.code)
+            val bodyJson = bodyElement as? JsonObject ?: throw bodyElement.parseErrorDetail(response.code)
+            bodyJson["error"]?.let { throw it.parseErrorDetail(response.code) }
             parseInteraction(bodyJson, fallbackModel = params.model.modelId)
         }
     }
@@ -138,20 +142,9 @@ internal class InteractionsAPI(
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
-
                 val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        exception = json.parseToJsonElement(bodyRaw).parseErrorDetail()
-                    } else if (t == null && response != null) {
-                        exception = Exception("Unknown error: ${response.code}")
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                } finally {
-                    close(exception ?: Exception("Stream failed"))
-                }
+                val exception = parseHttpError(response = response, bodyRaw = bodyRaw, fallback = t)
+                close(exception)
             }
 
             override fun onClosed(eventSource: EventSource) {
@@ -418,6 +411,17 @@ internal class InteractionsAPI(
                 put("data", base64Data)
             }
         }
+
+        is UIMessagePart.Document -> if (url.startsWith("data:")) {
+            val base64Data = url.substringAfter(";base64,", "")
+            if (base64Data.isNotEmpty()) {
+                buildJsonObject {
+                    put("type", "document")
+                    put("mime_type", mime.ifBlank { "text/plain" })
+                    put("data", base64Data)
+                }
+            } else null
+        } else null
 
         else -> null
     }

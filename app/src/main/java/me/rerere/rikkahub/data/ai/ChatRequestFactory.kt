@@ -12,6 +12,7 @@ import me.rerere.ai.agent.withRetry
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderManager
@@ -24,7 +25,9 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.buildMemoryPrompt
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.tools.GEMINI_OUTPUT_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.USER_INPUT_FILE_NAME
 import me.rerere.rikkahub.data.ai.tools.appendGeminiToolOutputInstruction
+import me.rerere.rikkahub.data.ai.tools.convertUserInputsToFiles
 import me.rerere.rikkahub.data.ai.tools.isGeminiModel
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
@@ -142,7 +145,7 @@ class ChatRequestFactory(
         val rawModel = settings.getChatModelOf(conversation)
             ?: throw IllegalStateException("No chat model selected")
         val provider = rawModel.findProvider(settings.providers) ?: error("Provider not found")
-        val useGeminiToolOutput = assistant.geminiToolOutput && isGeminiModel(rawModel, provider)
+        val useGeminiToolOutput = assistant.geminiToolOutput && !rawModel.outputModalities.contains(Modality.IMAGE)
         val model = if (useGeminiToolOutput && !rawModel.abilities.contains(ModelAbility.TOOL)) {
             rawModel.copy(abilities = rawModel.abilities + ModelAbility.TOOL)
         } else {
@@ -372,12 +375,23 @@ class ChatRequestFactory(
             processingStatus = processingStatus,
             workspaceCwd = turn.workspaceCwd,
         ).expandNotices()
-        val requestMessages = if (turn.useGeminiToolOutput) {
-            appendGeminiToolOutputInstruction(transformedMessages)
+        val fileAdjustedMessages = if (assistant.sendInputAsFile) {
+            convertUserInputsToFiles(transformedMessages, turn.providerSetting)
         } else {
             transformedMessages
         }
-        val forcedToolName = if (turn.useGeminiToolOutput) {
+        val requestMessages = if (turn.useGeminiToolOutput) {
+            appendGeminiToolOutputInstruction(fileAdjustedMessages)
+        } else {
+            fileAdjustedMessages
+        }
+        // 非 Gemini 推理模型（如 Claude Thinking / DeepSeek Reasoner）在开启思考时 API 拒绝强制 tool_choice，
+        // 此时保持 tool_choice 为 auto，由提示词引导调用 create_document；其余情况均在协议层强制调用工具
+        val canForceToolChoice = isGeminiModel(turn.model, turn.providerSetting) ||
+            !turn.model.abilities.contains(ModelAbility.REASONING) ||
+            !assistant.reasoningLevel.isEnabled
+        val forceToolUse = turn.useGeminiToolOutput && canForceToolChoice
+        val forcedToolName = if (forceToolUse) {
             GEMINI_OUTPUT_TOOL_NAME.takeIf {
                 turn.tools.none { t -> t.name != GEMINI_OUTPUT_TOOL_NAME && t.name != "get_time_info" } ||
                     activeToolTurn != null
@@ -391,7 +405,7 @@ class ChatRequestFactory(
             topP = assistant.topP,
             maxTokens = assistant.maxTokens,
             tools = turn.tools,
-            forceToolUse = turn.useGeminiToolOutput,
+            forceToolUse = forceToolUse,
             forcedToolName = forcedToolName,
             reasoningLevel = assistant.reasoningLevel,
             customHeaders = buildList {
@@ -465,6 +479,20 @@ class ChatRequestFactory(
         val lastMsgText = chatHistory.lastOrNull { it.toText().isNotBlank() }
             ?.toText()
             ?: chatHistory.lastOrNull()?.toText().orEmpty()
+        val macroUserText = if (assistant.sendInputAsFile && lastUserText.isNotBlank()) {
+            "[See attached file $USER_INPUT_FILE_NAME]"
+        } else {
+            lastUserText
+        }
+        val macroLastMsgText = if (
+            assistant.sendInputAsFile &&
+            chatHistory.lastOrNull()?.role == MessageRole.USER &&
+            lastMsgText.isNotBlank()
+        ) {
+            "[See attached file $USER_INPUT_FILE_NAME]"
+        } else {
+            lastMsgText
+        }
         val macroContext = StMacroContext(
             characterName = character?.name.orEmpty(),
             userName = personaName,
@@ -474,9 +502,9 @@ class ChatRequestFactory(
             scenario = character?.scenario.orEmpty(),
             mesExample = character?.mesExample.orEmpty(),
             modelName = turn.model.displayName,
-            input = lastUserText,
-            lastMessage = lastMsgText,
-            lastUserMessage = lastUserText,
+            input = macroUserText,
+            lastMessage = macroLastMsgText,
+            lastUserMessage = macroUserText,
             lastCharMessage = lastCharText,
         )
         val regexMacroResolver = StMacroResolver(variables, globalVariables, lockedVariables = presetVariables)
@@ -564,12 +592,21 @@ class ChatRequestFactory(
         stVariableRepository.saveGlobal(globalVariables)
 
         val expandedAssemblyMessages = assembly.messages.expandNotices()
-        val finalMessages = if (turn.useGeminiToolOutput) {
-            appendGeminiToolOutputInstruction(expandedAssemblyMessages)
+        val fileAdjustedMessages = if (assistant.sendInputAsFile) {
+            convertUserInputsToFiles(expandedAssemblyMessages, turn.providerSetting)
         } else {
             expandedAssemblyMessages
         }
-        val forcedToolName = if (turn.useGeminiToolOutput) {
+        val finalMessages = if (turn.useGeminiToolOutput) {
+            appendGeminiToolOutputInstruction(fileAdjustedMessages)
+        } else {
+            fileAdjustedMessages
+        }
+        val canForceToolChoice = isGeminiModel(turn.model, turn.providerSetting) ||
+            !turn.model.abilities.contains(ModelAbility.REASONING) ||
+            !assistant.reasoningLevel.isEnabled
+        val forceToolUse = turn.useGeminiToolOutput && canForceToolChoice
+        val forcedToolName = if (forceToolUse) {
             GEMINI_OUTPUT_TOOL_NAME.takeIf {
                 turn.tools.none { t -> t.name != GEMINI_OUTPUT_TOOL_NAME && t.name != "get_time_info" } ||
                     activeToolTurn != null
@@ -584,7 +621,7 @@ class ChatRequestFactory(
             topP = assistant.topP ?: preset.settings.topP,
             maxTokens = assistant.maxTokens ?: preset.settings.maxTokens,
             tools = turn.tools,
-            forceToolUse = turn.useGeminiToolOutput,
+            forceToolUse = forceToolUse,
             forcedToolName = forcedToolName,
             reasoningLevel = assistant.reasoningLevel,
             customHeaders = buildList {

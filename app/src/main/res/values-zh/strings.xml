@@ -123,8 +123,10 @@
   <string name="assistant_page_select_from_gallery">从相册选择</string>
   <string name="assistant_page_stream_output">流式输出</string>
   <string name="assistant_page_stream_output_desc">是否启用消息的流式输出</string>
-  <string name="assistant_page_gemini_tool_output">Gemini 工具输出 (防截断)</string>
-  <string name="assistant_page_gemini_tool_output_desc">使用 Gemini 模型时默认通过创建文档工具输出回复，大幅降低截断与空回概率</string>
+  <string name="assistant_page_gemini_tool_output">工具输出 (防截断)</string>
+  <string name="assistant_page_gemini_tool_output_desc">默认通过创建文档工具输出回复，大幅降低模型截断与空回概率</string>
+  <string name="assistant_page_send_input_as_file">以文件方式发送输入</string>
+  <string name="assistant_page_send_input_as_file_desc">发送请求时自动将用户文本转为文件附件 (user_input.txt)，降低输入审查拦截与空回概率</string>
   <string name="assistant_page_strict">严谨</string>
   <string name="assistant_page_system_prompt">系统提示词</string>
   <string name="assistant_page_tab_basic">基础设定</string>

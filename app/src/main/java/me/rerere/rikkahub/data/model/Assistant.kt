@@ -56,7 +56,8 @@ data class Assistant(
     val enableTimeReminder: Boolean = false, // 时间间隔提醒注入
     val timeReminderIntervalMinutes: Int = 60, // 时间提醒间隔（分钟，至少 1 分钟）
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
-    val geminiToolOutput: Boolean = true, // Gemini 模型默认使用工具输出以减少截断和空回
+    val geminiToolOutput: Boolean = true, // 默认使用工具输出以减少截断和空回
+    val sendInputAsFile: Boolean = false, // 将用户输入转为文件附件发送以绕过输入审查与减少空回
 )
 
 /**

@@ -260,6 +260,18 @@ internal fun AssistantBasicContent(
                 supportingContent = { Text(stringResource(R.string.assistant_page_gemini_tool_output_desc)) },
                 headlineContent = { Text(stringResource(R.string.assistant_page_gemini_tool_output)) },
             )
+            switchItem(
+                checked = assistant.sendInputAsFile,
+                onCheckedChange = {
+                    onUpdate(
+                        assistant.copy(
+                            sendInputAsFile = it
+                        )
+                    )
+                },
+                supportingContent = { Text(stringResource(R.string.assistant_page_send_input_as_file_desc)) },
+                headlineContent = { Text(stringResource(R.string.assistant_page_send_input_as_file)) },
+            )
         }
 
         CardGroup {

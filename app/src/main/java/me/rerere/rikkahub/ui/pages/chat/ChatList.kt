@@ -103,6 +103,77 @@ private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 
+/**
+ * 判断消息索引是否处于当前生效的压缩区间 `[startIdx..endIdx]` 内。
+ */
+internal fun isMessageInCompactedRange(
+    messageIndex: Int,
+    messageCount: Int,
+    checkpoint: ConversationCheckpointEntity?,
+): Boolean {
+    if (checkpoint == null || messageCount <= 0) return false
+    val lastIndex = messageCount - 1
+    val startIdx = (checkpoint.startFloor - 1).coerceIn(0, lastIndex)
+    val endIdx = (checkpoint.boundaryFloor - 1).coerceIn(startIdx, lastIndex)
+    return messageIndex in startIdx..endIdx
+}
+
+/**
+ * 将 `conversation.messageNodes` 的消息索引映射为 `ChatListNormal` 中 `LazyColumn` 的条目索引。
+ *
+ * 当存在 `checkpoint` 时：
+ * - `[0 until startIdx]` 为压缩前消息（索引不变）
+ * - `startIdx` 处插入 1 个 `CompactedSummaryCard`
+ * - 若 `isCheckpointExpanded == true`，`[startIdx..endIdx]` 与 `(endIdx..lastIndex]` 均在摘要卡片之后，整体偏移 `+1`
+ * - 若 `isCheckpointExpanded == false`，`[startIdx..endIdx]` 被折叠为摘要卡片（对应 `startIdx`），
+ *   而 `(endIdx..lastIndex]` 紧跟在摘要卡片之后，偏移为 `-(endIdx - startIdx)`
+ */
+internal fun messageIndexToLazyIndex(
+    messageIndex: Int,
+    messageCount: Int,
+    checkpoint: ConversationCheckpointEntity?,
+    isCheckpointExpanded: Boolean,
+): Int {
+    if (messageCount <= 0) return 0
+    val clampedIndex = messageIndex.coerceIn(0, messageCount - 1)
+    if (checkpoint == null) return clampedIndex
+
+    val lastIndex = messageCount - 1
+    val startIdx = (checkpoint.startFloor - 1).coerceIn(0, lastIndex)
+    val endIdx = (checkpoint.boundaryFloor - 1).coerceIn(startIdx, lastIndex)
+
+    return when {
+        clampedIndex < startIdx -> clampedIndex
+        isCheckpointExpanded -> clampedIndex + 1
+        clampedIndex in startIdx..endIdx -> startIdx
+        else -> clampedIndex - (endIdx - startIdx)
+    }
+}
+
+/**
+ * 将 `ChatListNormal` 中 `LazyColumn` 的条目索引反向还原为 `conversation.messageNodes` 的消息索引。
+ */
+internal fun lazyIndexToMessageIndex(
+    lazyIndex: Int,
+    messageCount: Int,
+    checkpoint: ConversationCheckpointEntity?,
+    isCheckpointExpanded: Boolean,
+): Int {
+    if (messageCount <= 0) return 0
+    val lastIndex = messageCount - 1
+    if (checkpoint == null) return lazyIndex.coerceIn(0, lastIndex)
+
+    val startIdx = (checkpoint.startFloor - 1).coerceIn(0, lastIndex)
+    val endIdx = (checkpoint.boundaryFloor - 1).coerceIn(startIdx, lastIndex)
+
+    return when {
+        lazyIndex < startIdx -> lazyIndex.coerceAtLeast(0)
+        lazyIndex == startIdx -> startIdx
+        isCheckpointExpanded -> (lazyIndex - 1).coerceIn(0, lastIndex)
+        else -> (endIdx + (lazyIndex - startIdx)).coerceIn(0, lastIndex)
+    }
+}
+
 @Composable
 fun ChatList(
     innerPadding: PaddingValues,
@@ -117,6 +188,8 @@ fun ChatList(
     settings: Settings,
     hazeState: HazeState,
     checkpoint: ConversationCheckpointEntity? = null,
+    isCheckpointExpanded: Boolean = false,
+    onCheckpointExpandedChange: (Boolean) -> Unit = {},
     errors: List<ChatError> = emptyList(),
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
@@ -180,6 +253,8 @@ fun ChatList(
                 settings = settings,
                 hazeState = hazeState,
                 checkpoint = checkpoint,
+                isCheckpointExpanded = isCheckpointExpanded,
+                onCheckpointExpandedChange = onCheckpointExpandedChange,
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
@@ -219,6 +294,8 @@ fun ChatList(
                     listState = previewListState,
                     settings = settings,
                     hazeState = hazeState,
+                    checkpoint = checkpoint,
+                    isCheckpointExpanded = isCheckpointExpanded,
                     onJumpToMessage = onJumpToMessage,
                 )
             }
@@ -255,6 +332,8 @@ private fun ChatListNormal(
     settings: Settings,
     hazeState: HazeState,
     checkpoint: ConversationCheckpointEntity? = null,
+    isCheckpointExpanded: Boolean = false,
+    onCheckpointExpandedChange: (Boolean) -> Unit = {},
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
@@ -334,13 +413,16 @@ private fun ChatListNormal(
             .associateBy { it.id }
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
-    var isCheckpointExpanded by rememberSaveable(checkpoint?.id) { mutableStateOf(false) }
 
-    val startIdx = remember(checkpoint) {
-        checkpoint?.let { (it.startFloor - 1).coerceAtLeast(0) } ?: 0
+    val startIdx = remember(checkpoint, conversation.messageNodes.size) {
+        if (checkpoint != null && conversation.messageNodes.isNotEmpty()) {
+            (checkpoint.startFloor - 1).coerceIn(0, conversation.messageNodes.lastIndex)
+        } else 0
     }
-    val endIdx = remember(checkpoint, conversation.messageNodes.size) {
-        checkpoint?.let { (it.boundaryFloor - 1).coerceAtMost(conversation.messageNodes.lastIndex) } ?: 0
+    val endIdx = remember(checkpoint, conversation.messageNodes.size, startIdx) {
+        if (checkpoint != null && conversation.messageNodes.isNotEmpty()) {
+            (checkpoint.boundaryFloor - 1).coerceIn(startIdx, conversation.messageNodes.lastIndex)
+        } else 0
     }
 
     val nodesBefore = remember(conversation.messageNodes, checkpoint, startIdx) {
@@ -485,7 +567,7 @@ private fun ChatListNormal(
                     CompactedSummaryCard(
                         checkpoint = checkpoint,
                         isExpanded = isCheckpointExpanded,
-                        onToggleExpand = { isCheckpointExpanded = !isCheckpointExpanded },
+                        onToggleExpand = { onCheckpointExpandedChange(!isCheckpointExpanded) },
                         onUpdateSummary = onUpdateCheckpointSummary?.let { action ->
                             { newSummary -> action(checkpoint.id, newSummary) }
                         },

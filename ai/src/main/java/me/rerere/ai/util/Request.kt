@@ -61,7 +61,12 @@ internal suspend fun OkHttpClient.fetchBody(request: Request): String = withCont
     newCall(request).await().use { response ->
         val body = response.body.string()
         if (!response.isSuccessful) {
-            error("Request to ${request.url.encodedPath} failed: ${response.code} $body")
+            val parsedError = parseErrorBody(
+                bodyRaw = body,
+                statusCode = response.code,
+                statusMessage = response.message,
+            )
+            error("Request to ${request.url.encodedPath} failed: ${parsedError.message}")
         }
         body
     }
@@ -69,8 +74,8 @@ internal suspend fun OkHttpClient.fetchBody(request: Request): String = withCont
 
 fun ResponseBody.stringSafe(): String? {
     return when (this) {
-        is RealResponseBody -> string()
-        else -> null
+        is RealResponseBody -> runCatching { string() }.getOrNull()
+        else -> runCatching { string() }.getOrNull()
     }
 }
 

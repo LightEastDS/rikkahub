@@ -11,13 +11,21 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 
 const val GEMINI_OUTPUT_TOOL_NAME = "create_document"
+const val USER_INPUT_FILE_NAME = "user_input.txt"
 
 internal const val GEMINI_TOOL_OUTPUT_INSTRUCTION = """
 [Document Output Protocol / 工具输出要求]
 你必须调用 `create_document` 工具来输出本轮的完整回复内容（将所有输出内容完整写入 `content` 参数中），禁止直接以普通文本输出正文。
 如果上下文或预设要求了特定的输出格式或标签（例如 `<think>`、`<dream_think>`、`<dream_scene>`、`<dream_plot>`、`<dream_body>`、`<dream_summary>` 等），请严格按照要求生成，并将包含这些标签在内的全部完整内容原封不动地写入 `create_document` 工具的 `content` 参数中，严禁省略或截断。
+"""
+
+internal const val FILE_INPUT_INSTRUCTION = """
+[File Input Protocol / 附件输入说明]
+本轮用户输入内容已完整封装在附件文件 `user_input.txt` 中。请直接读取该文件中的全部内容作为用户本轮发送的消息，并严格按照上下文与设定直接给出回复，无需在正文中提及或解释“我已读取附件文件”。
 """
 
 /**
@@ -119,5 +127,74 @@ private fun appendInstructionToUserMessage(message: UIMessage, instruction: Stri
         )
     } else {
         message.copy(parts = message.parts + UIMessagePart.Text(instruction))
+    }
+}
+
+/**
+ * 将请求中真实的用户消息（非合成提示词）转换为文件附件形式发送给 AI，
+ * 以规避输入侧敏感词审查并减少空回情况：
+ * - Google (Gemini / Interactions) 与 Claude 渠道：编码为原生文档部件 (`inlineData` / `document` block)，
+ *   使得原始文本在协议层以附件载荷（Gemini 下为 Base64）传输，不出现在普通文本字段中；
+ * - OpenAI 及其他兼容渠道：封装为 `<UploadFile name="user_input.txt">` 文本块。
+ */
+@OptIn(ExperimentalEncodingApi::class)
+internal fun convertUserInputsToFiles(
+    messages: List<UIMessage>,
+    providerSetting: ProviderSetting? = null,
+): List<UIMessage> {
+    val instruction = FILE_INPUT_INSTRUCTION.trim()
+    val useNativeDocumentPart =
+        providerSetting is ProviderSetting.Google || providerSetting is ProviderSetting.Claude
+
+    return messages.map { message ->
+        if (message.role != MessageRole.USER || message.isSynthetic) {
+            return@map message
+        }
+        val textParts = message.parts.filterIsInstance<UIMessagePart.Text>()
+        val combinedText = textParts
+            .map { it.text.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n\n")
+        if (combinedText.isEmpty()) {
+            return@map message
+        }
+        // 已转换过的消息不再重复封装
+        if (combinedText.contains(instruction) ||
+            message.parts.any { it is UIMessagePart.Document && it.fileName == USER_INPUT_FILE_NAME && it.url.startsWith("data:") }
+        ) {
+            return@map message
+        }
+
+        // DocumentAsPromptTransformer 已经把本地 file:// 文档转换成了 <UploadFile> Text 部件，
+        // 这里保留图片/音视频及已有的 data: 文档部件
+        val preservedParts = message.parts.filter { part ->
+            part !is UIMessagePart.Text &&
+                !(part is UIMessagePart.Document && !part.url.startsWith("data:"))
+        }
+
+        val fileParts = if (useNativeDocumentPart) {
+            val base64 = Base64.encode(combinedText.encodeToByteArray())
+            listOf(
+                UIMessagePart.Document(
+                    url = "data:text/plain;base64,$base64",
+                    fileName = USER_INPUT_FILE_NAME,
+                    mime = "text/plain",
+                ),
+                UIMessagePart.Text(instruction),
+            )
+        } else {
+            val wrappedPrompt = buildString {
+                appendLine("""<UploadFile name="$USER_INPUT_FILE_NAME">""")
+                appendLine("```")
+                appendLine(combinedText)
+                appendLine("```")
+                appendLine("</UploadFile>")
+                appendLine()
+                append(instruction)
+            }
+            listOf(UIMessagePart.Text(wrappedPrompt))
+        }
+
+        message.copy(parts = preservedParts + fileParts)
     }
 }

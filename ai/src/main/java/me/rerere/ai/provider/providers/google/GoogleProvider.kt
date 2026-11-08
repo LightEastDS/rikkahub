@@ -64,6 +64,8 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.parseHttpError
+import me.rerere.ai.util.parseJsonOrThrowHttpError
 import me.rerere.ai.util.removeElements
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
@@ -210,13 +212,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+            throw parseHttpError(response, response.body?.string())
         }
 
         val bodyStr = response.body?.string() ?: ""
-        val bodyElement = json.parseToJsonElement(bodyStr)
-        val bodyJson = bodyElement as? JsonObject ?: throw bodyElement.parseErrorDetail()
-        bodyJson["error"]?.let { throw it.parseErrorDetail() }
+        val bodyElement = parseJsonOrThrowHttpError(bodyStr, response.code)
+        val bodyJson = bodyElement as? JsonObject ?: throw bodyElement.parseErrorDetail(response.code)
+        bodyJson["error"]?.let { throw it.parseErrorDetail(response.code) }
         val blockedReason = bodyJson["promptFeedback"]?.jsonObject
             ?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
         if (blockedReason != null) error("Prompt feedback: $blockedReason")
@@ -322,33 +324,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 t: Throwable?,
                 response: Response?
             ) {
-                var exception = t
-
                 t?.printStackTrace()
                 println("[onFailure] 发生错误: ${t?.message}")
 
-                try {
-                    if (t == null && response != null) {
-                        val bodyStr = response.body.stringSafe()
-                        if (!bodyStr.isNullOrEmpty()) {
-                            val bodyElement = json.parseToJsonElement(bodyStr)
-                            println(bodyElement)
-                            if (bodyElement is JsonObject) {
-                                exception = Exception(
-                                    bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
-                                        ?: "unknown"
-                                )
-                            }
-                        } else {
-                            exception = Exception("Unknown error: ${response.code}")
-                        }
-                    }
-                } catch (e: Throwable) {
-                    e.printStackTrace()
-                    exception = e
-                } finally {
-                    close(exception ?: Exception("Stream failed"))
-                }
+                val bodyRaw = response?.body?.stringSafe()
+                val exception = parseHttpError(response = response, bodyRaw = bodyRaw, fallback = t)
+                close(exception)
             }
 
             override fun onClosed(eventSource: EventSource) {
@@ -845,6 +826,20 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     })
                 }
             }
+        }
+
+        is UIMessagePart.Document -> {
+            if (url.startsWith("data:")) {
+                val base64Data = url.substringAfter(";base64,", "")
+                if (base64Data.isNotEmpty()) {
+                    buildJsonObject {
+                        put("inlineData", buildJsonObject {
+                            put("mimeType", mime.ifBlank { "text/plain" })
+                            put("data", base64Data)
+                        })
+                    }
+                } else null
+            } else null
         }
 
         else -> null

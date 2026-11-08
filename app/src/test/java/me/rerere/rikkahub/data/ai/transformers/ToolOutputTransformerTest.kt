@@ -6,12 +6,15 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.tools.GEMINI_OUTPUT_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.USER_INPUT_FILE_NAME
 import me.rerere.rikkahub.data.ai.tools.appendGeminiToolOutputInstruction
+import me.rerere.rikkahub.data.ai.tools.convertUserInputsToFiles
 import me.rerere.rikkahub.data.ai.tools.isGeminiModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Base64
 import kotlin.time.Instant
 
 class ToolOutputTransformerTest {
@@ -105,5 +108,54 @@ class ToolOutputTransformerTest {
 
         assertEquals(MessageRole.USER, updated.last().role)
         assertTrue(updated.last().toText().contains(GEMINI_OUTPUT_TOOL_NAME))
+    }
+
+    @Test
+    fun `convertUserInputsToFiles converts user text to inline Document for Google and Claude`() {
+        val googleProvider = ProviderSetting.Google(name = "Google")
+        val claudeProvider = ProviderSetting.Claude(name = "Claude")
+        val messages = listOf(
+            UIMessage.system("系统提示词"),
+            UIMessage.user("请帮我继续编写这段故事"),
+            UIMessage(
+                role = MessageRole.USER,
+                parts = listOf(UIMessagePart.Text("[System Reminder: Time is 12:00]")),
+                isSynthetic = true,
+            ),
+        )
+
+        for (provider in listOf(googleProvider, claudeProvider)) {
+            val converted = convertUserInputsToFiles(messages, provider)
+            assertEquals("系统提示词", converted[0].toText())
+
+            val userParts = converted[1].parts
+            val docPart = userParts.filterIsInstance<UIMessagePart.Document>().single()
+            assertEquals(USER_INPUT_FILE_NAME, docPart.fileName)
+            assertEquals("text/plain", docPart.mime)
+            assertTrue(docPart.url.startsWith("data:text/plain;base64,"))
+            val decoded = String(
+                Base64.getDecoder().decode(docPart.url.removePrefix("data:text/plain;base64,")),
+                Charsets.UTF_8,
+            )
+            assertEquals("请帮我继续编写这段故事", decoded)
+
+            // Synthetic user messages should not be converted to files
+            assertEquals("[System Reminder: Time is 12:00]", converted[2].toText())
+            assertTrue(converted[2].parts.none { it is UIMessagePart.Document })
+        }
+    }
+
+    @Test
+    fun `convertUserInputsToFiles wraps user text in UploadFile tag for OpenAI provider`() {
+        val openAiProvider = ProviderSetting.OpenAI(name = "OpenAI")
+        val messages = listOf(
+            UIMessage.user("测试OpenAI文件方式输入"),
+        )
+
+        val converted = convertUserInputsToFiles(messages, openAiProvider)
+        val text = converted.single().toText()
+        assertTrue(text.contains("""<UploadFile name="$USER_INPUT_FILE_NAME">"""))
+        assertTrue(text.contains("测试OpenAI文件方式输入"))
+        assertTrue(text.contains("</UploadFile>"))
     }
 }
