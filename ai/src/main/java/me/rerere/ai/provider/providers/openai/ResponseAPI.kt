@@ -592,6 +592,11 @@ class ResponseAPI(
             val output = outputItem.jsonObject
             val type = output["type"]?.jsonPrimitive?.content ?: error("output type not found")
             when (type) {
+                "image_generation_call" -> {
+                    output["result"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { data ->
+                        parts.add(UIMessagePart.Image("data:${output.imageGenerationMimeType()};base64,$data"))
+                    }
+                }
                 "reasoning" -> {
                     val reasoningMetadata = OpenAIReasoningMetadata(
                         reasoningId = output["id"]?.jsonPrimitive?.contentOrNull,
@@ -714,6 +719,14 @@ class ResponseAPI(
                 ?: 0
         )
     }
+}
+
+internal fun JsonObject.imageGenerationMimeType(): String = when (
+    get("output_format")?.jsonPrimitive?.contentOrNull
+) {
+    "jpeg", "jpg" -> "image/jpeg"
+    "webp" -> "image/webp"
+    else -> "image/png"
 }
 
 // function_call_output.output 可以是字符串，也可以是 input_text 等内容数组

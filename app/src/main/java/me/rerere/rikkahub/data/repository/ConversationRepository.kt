@@ -389,7 +389,9 @@ class ConversationRepository(
     }
 
     fun conversationToConversationEntity(conversation: Conversation): ConversationEntity {
-        require(conversation.messageNodes.none { it.messages.any { message -> message.hasBase64Part() } })
+        require(conversation.messageNodes.none { it.messages.any { message -> message.hasBase64Part() } }) {
+            "Conversation contains inline image data that has not been saved to a local file"
+        }
         return ConversationEntity(
             id = conversation.id.toString(),
             title = conversation.title,

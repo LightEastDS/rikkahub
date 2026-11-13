@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.finishReasoning
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.isAwaitingToolApproval
@@ -199,11 +200,28 @@ class ConversationSession(
     }
 
     // 失败和取消也必须保存已收到的内容，且保存完成前不能释放生成任务。
-    suspend fun finishGeneration(): Conversation = withContext(NonCancellable) {
+    suspend fun finishGeneration(
+        persistImage: suspend (UIMessagePart.Image) -> UIMessagePart.Image? = { it },
+    ): Conversation = withContext(NonCancellable) {
+        // 失败或取消不会经过 finishStep，内存里可能还有 Base64 预览或空占位。
+        // 文件 IO 可以挂起；只把对应 URL 的转换合并到最新状态，不能覆盖期间的会话编辑。
+        val imageUrls = state.value.messageNodes.flatMap { it.messages }.flatMap { it.parts }
+            .filterIsInstance<UIMessagePart.Image>()
+            .filter { it.url.startsWith("data:") }
+            .distinctBy { it.url }
+            .associate { it.url to persistImage(it)?.url }
         update { current ->
             current.copy(
                 messageNodes = current.messageNodes.map { node ->
-                    node.copy(messages = node.messages.map { it.finishReasoning() })
+                    node.copy(messages = node.messages.map { message ->
+                        message.copy(parts = message.parts.mapNotNull { part ->
+                            if (part is UIMessagePart.Image && part.url in imageUrls) {
+                                imageUrls[part.url]?.let { part.copy(url = it) }
+                            } else {
+                                part
+                            }
+                        }).finishReasoning()
+                    })
                 },
                 updateAt = Instant.now(),
             )
@@ -356,5 +374,27 @@ internal suspend fun afterPreviousGeneration(previous: Job?, block: suspend () -
         previous?.cancel()
         withContext(NonCancellable) { previous?.join() }
         throw e
+    }
+}
+
+/** A failed final save must not hide the provider error (or turn cancellation into a save error). */
+internal suspend fun <T> withGenerationCleanup(
+    block: suspend () -> T,
+    cleanup: suspend () -> Unit,
+): T {
+    var failure: Throwable? = null
+    try {
+        return block()
+    } catch (e: Throwable) {
+        failure = e
+        throw e
+    } finally {
+        try {
+            cleanup()
+        } catch (e: Throwable) {
+            val original = failure
+            if (original == null) throw e
+            if (original !== e) original.addSuppressed(e)
+        }
     }
 }

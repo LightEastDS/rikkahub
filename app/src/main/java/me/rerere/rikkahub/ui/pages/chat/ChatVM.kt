@@ -7,18 +7,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.analytics.FirebaseAnalytics
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -30,6 +33,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.ChatDraftStore
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
@@ -50,6 +54,7 @@ import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.SessionActivity
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.utils.AppAnalytics
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.UpdateChecker
 import me.rerere.rikkahub.web.ApiException
@@ -64,11 +69,12 @@ class ChatVM(
     private val settingsStore: SettingsStore,
     private val chatService: ChatService,
     val updateChecker: UpdateChecker,
-    private val analytics: FirebaseAnalytics,
+    private val analytics: AppAnalytics,
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
     private val checkpointRepository: ConversationCheckpointRepository,
     private val backgroundShellManager: BackgroundShellManager,
+    private val chatDraftStore: ChatDraftStore,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
@@ -80,6 +86,7 @@ class ChatVM(
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
+    private var draftInitialized = false
 
     val voiceSession = VoiceSessionController(viewModelScope, context::getString) {
         chatService.enqueueVoiceMessage(_conversationId, it)
@@ -113,11 +120,57 @@ class ChatVM(
             chatService.initializeConversation(_conversationId)
         }
 
+        // 防抖保存当前输入草稿，避免编辑历史消息时覆盖草稿
+        @OptIn(FlowPreview::class)
+        viewModelScope.launch {
+            snapshotFlow {
+                Triple(
+                    inputState.textContent.text.toString(),
+                    inputState.messageContent,
+                    inputState.isEditing(),
+                )
+            }
+                .debounce(300)
+                .collect { (text, attachments, isEditing) ->
+                    if (draftInitialized && !isEditing && !settings.value.init && settings.value.displaySetting.keepInputDraft) {
+                        chatDraftStore.save(_conversationId, text, attachments)
+                    }
+                }
+        }
+
         // 记住对话ID, 方便下次启动恢复
         context.writeStringPreference("lastConversationId", _conversationId.toString())
     }
 
+    internal fun markDraftReadyWithoutRestore() {
+        draftInitialized = true
+    }
+
+    internal suspend fun restoreDraftIfNeeded() {
+        if (draftInitialized) return
+        val currentSettings = settingsStore.settingsFlow.first { !it.init }
+        if (draftInitialized) return
+        if (currentSettings.displaySetting.keepInputDraft && inputState.isEmpty() && !inputState.isEditing()) {
+            chatDraftStore.get(_conversationId)?.let { draft ->
+                if (draft.text.isNotEmpty()) {
+                    inputState.setMessageText(draft.text)
+                }
+                if (draft.attachments.isNotEmpty()) {
+                    inputState.messageContent = draft.attachments
+                }
+            }
+        }
+        draftInitialized = true
+    }
+
     override fun onCleared() {
+        if (draftInitialized && !settings.value.init && settings.value.displaySetting.keepInputDraft && !inputState.isEditing()) {
+            chatDraftStore.save(
+                conversationId = _conversationId,
+                text = inputState.textContent.text.toString(),
+                attachments = inputState.messageContent,
+            )
+        }
         voiceSession.stop()
         super.onCleared()
         // 移除对话引用
@@ -252,14 +305,14 @@ class ChatVM(
      */
     fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
-        analytics.logEvent("ai_send_message", null)
+        analytics.logEvent("ai_send_message")
 
         chatService.sendMessage(_conversationId, content, answer)
     }
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
         if (parts.isEmptyInputMessage()) return
-        analytics.logEvent("ai_edit_message", null)
+        analytics.logEvent("ai_edit_message")
 
         viewModelScope.launch {
             chatService.editMessage(_conversationId, messageId, parts)
@@ -355,7 +408,7 @@ class ChatVM(
     }
 
     fun regenerateAtMessage(message: UIMessage) {
-        analytics.logEvent("ai_regenerate_at_message", null)
+        analytics.logEvent("ai_regenerate_at_message")
         chatService.regenerateAtMessage(_conversationId, message.id)
     }
 
@@ -364,7 +417,7 @@ class ChatVM(
         approved: Boolean,
         reason: String = ""
     ) {
-        analytics.logEvent("ai_tool_approval", null)
+        analytics.logEvent("ai_tool_approval")
         chatService.handleToolApproval(_conversationId, toolCallId, approved, reason)
     }
 
@@ -372,7 +425,7 @@ class ChatVM(
         toolCallId: String,
         answer: String,
     ) {
-        analytics.logEvent("ai_tool_answer", null)
+        analytics.logEvent("ai_tool_answer")
         chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
     }
 

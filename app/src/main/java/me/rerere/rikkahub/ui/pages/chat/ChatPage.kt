@@ -174,8 +174,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val inputState = vm.inputState
 
-    // 初始化输入状态（处理传入的 files 和 text 参数）
-    LaunchedEffect(files, text) {
+    // 初始化输入状态（处理传入的 files 和 text 参数，或恢复未发送草稿）
+    LaunchedEffect(id, files, text) {
+        val hasExternalInput = files.isNotEmpty() || !text.isNullOrEmpty()
+        if (hasExternalInput) {
+            vm.markDraftReadyWithoutRestore()
+        }
         if (files.isNotEmpty()) {
             val localFiles = filesManager.createChatFilesByContents(files)
             val contentTypes = files.mapNotNull { file ->
@@ -199,6 +203,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             if (decodedText.isNotEmpty()) {
                 inputState.setMessageText(decodedText)
             }
+        }
+        if (!hasExternalInput) {
+            vm.restoreDraftIfNeeded()
         }
     }
 
@@ -854,7 +861,7 @@ private fun TopBar(
                         Text(
                             text = "${assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${chatModel.displayName} (${provider.name})",
                             overflow = TextOverflow.Ellipsis,
-                            maxLines = 1,
+                            maxLines = 2,
                             color = LocalContentColor.current.copy(0.65f),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontSize = 8.sp,

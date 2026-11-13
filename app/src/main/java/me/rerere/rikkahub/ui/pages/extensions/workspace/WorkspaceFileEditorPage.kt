@@ -4,14 +4,15 @@ import android.content.ClipData
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
@@ -49,6 +50,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -89,6 +91,9 @@ fun WorkspaceFileEditorPage(
     val supportsPreview = isMarkdown || isWebPreview
     var showPreview by rememberSaveable(id, area, path) { mutableStateOf(supportsPreview) }
     var autoWrap by rememberSaveable(id, area, path) { mutableStateOf(true) }
+    var renderMarkdown by rememberSaveable(id, area, path) {
+        mutableStateOf(settings.displaySetting.enableMarkdownRendering)
+    }
 
     // 不能用 rememberTextFieldState: 它会把全文存进 saved state Bundle, 大文件切后台时触发 TransactionTooLargeException (#1953).
     // 内容本就由下方 LaunchedEffect 从磁盘加载, 无需 saveable.
@@ -128,11 +133,6 @@ fun WorkspaceFileEditorPage(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            FilterChip(
-                                selected = autoWrap,
-                                onClick = { autoWrap = !autoWrap },
-                                label = { Text(stringResource(R.string.workspace_editor_auto_wrap)) },
-                            )
                             TextButton(
                                 onClick = {
                                     val contentToCopy = textState.text.toString()
@@ -222,82 +222,126 @@ fun WorkspaceFileEditorPage(
                 )
             }
 
-            showPreview && isMarkdown -> {
-                val effectiveSettings = remember(settings, autoWrap) {
-                    settings.copy(
-                        displaySetting = settings.displaySetting.copy(codeBlockAutoWrap = autoWrap)
-                    )
-                }
-                val verticalScroll = rememberScrollState()
-                val horizontalScroll = rememberScrollState()
-                CompositionLocalProvider(
-                    LocalWorkspaceId provides id,
-                    LocalSettings provides effectiveSettings,
-                ) {
-                    SelectableContent {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(innerPadding)
-                                .verticalScroll(verticalScroll)
-                                .then(
-                                    if (autoWrap) {
-                                        Modifier.fillMaxWidth()
-                                    } else {
-                                        Modifier
-                                            .horizontalScroll(horizontalScroll)
-                                            .width(IntrinsicSize.Max)
-                                    }
-                                )
-                                .padding(16.dp),
-                        ) {
-                            MarkdownBlock(
-                                content = textState.text.toString(),
-                                modifier = if (autoWrap) Modifier.fillMaxWidth() else Modifier,
+            else -> Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                if (!(showPreview && isWebPreview)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FilterChip(
+                            selected = autoWrap,
+                            onClick = { autoWrap = !autoWrap },
+                            label = { Text(stringResource(R.string.workspace_editor_auto_wrap)) },
+                        )
+                        if (showPreview && isMarkdown) {
+                            FilterChip(
+                                selected = renderMarkdown,
+                                onClick = { renderMarkdown = !renderMarkdown },
+                                label = { Text(stringResource(R.string.workspace_editor_markdown)) },
                             )
                         }
                     }
                 }
-            }
-
-            showPreview && isWebPreview -> WorkspaceWebPreview(
-                content = textState.text.toString(),
-                isSvg = extension == "svg",
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-            )
-
-            else -> {
-                val horizontalScroll = rememberScrollState()
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .imePadding()
-                        .then(
-                            if (autoWrap) {
-                                Modifier
-                            } else {
-                                Modifier.horizontalScroll(horizontalScroll)
-                            }
-                        ),
+                        .weight(1f)
+                        .fillMaxWidth(),
                 ) {
-                    TextField(
-                        state = textState,
-                        modifier = if (autoWrap) {
-                            Modifier.fillMaxSize()
-                        } else {
-                            Modifier
-                                .width(IntrinsicSize.Max)
-                                .fillMaxSize()
-                        },
-                        readOnly = !editable,
-                        lineLimits = TextFieldLineLimits.MultiLine(),
-                        textStyle = LocalTextStyle.current.copy(
-                            fontFamily = JetbrainsMono,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp,
-                        ),
-                    )
+                    when {
+                        showPreview && isMarkdown -> {
+                            val effectiveSettings = remember(settings, autoWrap) {
+                                settings.copy(
+                                    displaySetting = settings.displaySetting.copy(codeBlockAutoWrap = autoWrap)
+                                )
+                            }
+                            val verticalScroll = rememberScrollState()
+                            CompositionLocalProvider(
+                                LocalWorkspaceId provides id,
+                                LocalSettings provides effectiveSettings,
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(verticalScroll)
+                                        .padding(16.dp),
+                                ) {
+                                    if (renderMarkdown) {
+                                        SelectableContent {
+                                            MarkdownBlock(
+                                                content = textState.text.toString(),
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                    } else {
+                                        HighlightCodeBlock(
+                                            code = textState.text.toString(),
+                                            language = "markdown",
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        showPreview && isWebPreview -> WorkspaceWebPreview(
+                            content = textState.text.toString(),
+                            isSvg = extension == "svg",
+                            modifier = Modifier.fillMaxSize(),
+                        )
+
+                        else -> {
+                            BoxWithConstraints(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .imePadding(),
+                            ) {
+                                val viewportWidth = maxWidth
+                                val viewportHeight = maxHeight
+                                if (autoWrap) {
+                                    TextField(
+                                        state = textState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        readOnly = !editable,
+                                        lineLimits = TextFieldLineLimits.MultiLine(),
+                                        textStyle = LocalTextStyle.current.copy(
+                                            fontFamily = JetbrainsMono,
+                                            fontSize = 13.sp,
+                                            lineHeight = 18.sp,
+                                        ),
+                                    )
+                                } else {
+                                    // Avoid IntrinsicSize.Max on SubcomposeLayout/TextField when word wrap is disabled
+                                    val horizontalScroll = rememberScrollState()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .horizontalScroll(horizontalScroll),
+                                    ) {
+                                        TextField(
+                                            state = textState,
+                                            modifier = Modifier
+                                                .widthIn(min = viewportWidth)
+                                                .height(viewportHeight),
+                                            readOnly = !editable,
+                                            lineLimits = TextFieldLineLimits.MultiLine(),
+                                            textStyle = LocalTextStyle.current.copy(
+                                                fontFamily = JetbrainsMono,
+                                                fontSize = 13.sp,
+                                                lineHeight = 18.sp,
+                                            ),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

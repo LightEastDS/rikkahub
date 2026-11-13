@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.files.decodeGeneratedImage
 import me.rerere.rikkahub.data.model.Conversation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,6 +31,126 @@ import org.junit.Test
 import kotlin.uuid.Uuid
 
 class ConversationSessionTest {
+    @Test
+    fun `failed image generation removes placeholder and preserves provider error`() = runBlocking {
+        val id = Uuid.random()
+        val store = FakeConversationStore()
+        val session = ConversationSession(id, Conversation.ofId(id), this, store, {})
+        session.initialize(load = { null }, create = { Conversation.ofId(id) })
+        session.update {
+            it.updateCurrentMessages(listOf(UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Text("Drawing"), UIMessagePart.Image("data:image/png;base64,")),
+            )))
+        }
+        // The same persistence invariant enforced by ConversationRepository.
+        store.beforeWrite = {
+            require(session.state.value.currentMessages.none { it.hasBase64Part() })
+        }
+        val providerError = IllegalStateException("Image generation failed upstream")
+        val error = runCatching {
+            withGenerationCleanup(block = { throw providerError }, cleanup = {
+                session.finishGeneration { image ->
+                    assertNull(decodeGeneratedImage(image.url))
+                    null
+                }
+            })
+        }.exceptionOrNull()
+
+        assertSame(providerError, error)
+        assertTrue(providerError.suppressed.isEmpty())
+        assertEquals("Drawing", store.persisted!!.currentMessages.single().toText())
+        assertTrue(store.persisted!!.currentMessages.single().parts.none { it is UIMessagePart.Image })
+    }
+
+    @Test
+    fun `final image persistence merges into latest state after suspending`() = runBlocking {
+        val id = Uuid.random()
+        val store = FakeConversationStore()
+        val session = ConversationSession(id, Conversation.ofId(id), this, store, {})
+        session.initialize(load = { null }, create = { Conversation.ofId(id) })
+        val reply = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Image("data:image/png;base64,aW1hZ2U=")),
+        )
+        session.update { it.updateCurrentMessages(listOf(reply)) }
+        val allowSave = CompletableDeferred<Unit>()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            session.finishGeneration { image ->
+                allowSave.await()
+                image.copy(url = "file:///saved.png")
+            }
+        }
+        session.update {
+            it.copy(title = "Edited during save", isPinned = true).updateCurrentMessages(listOf(
+                reply.copy(parts = reply.parts + UIMessagePart.Text("Preserve this edit")),
+            ))
+        }
+        allowSave.complete(Unit)
+        job.join()
+
+        val saved = store.persisted!!
+        assertEquals("Edited during save", saved.title)
+        assertTrue(saved.isPinned)
+        assertEquals(
+            "Preserve this edit",
+            saved.currentMessages.single().parts.filterIsInstance<UIMessagePart.Text>().single().text,
+        )
+        assertEquals("file:///saved.png", (saved.currentMessages.single().parts.first() as UIMessagePart.Image).url)
+        assertFalse(saved.currentMessages.single().hasBase64Part())
+    }
+
+    @Test
+    fun `cleanup failure is suppressed instead of replacing generation failure or cancellation`() = runBlocking {
+        for (original in listOf(
+            IllegalStateException("provider error"),
+            kotlinx.coroutines.CancellationException("stop")
+        )) {
+            val saveError = IllegalArgumentException("Failed requirement.")
+            val result = runCatching {
+                withGenerationCleanup(block = { throw original }, cleanup = { throw saveError })
+            }.exceptionOrNull()
+            assertSame(original, result)
+            assertSame(saveError, result!!.suppressed.single())
+        }
+    }
+
+    @Test
+    fun `cleanup failure after successful generation is still reported`() = runBlocking {
+        val saveError = IllegalStateException("Disk full")
+        val result = runCatching {
+            withGenerationCleanup(block = { Unit }, cleanup = { throw saveError })
+        }.exceptionOrNull()
+        assertSame(saveError, result)
+    }
+
+    @Test
+    fun `cancellation still persists a received image preview`() = runTest {
+        val id = Uuid.random()
+        val store = FakeConversationStore()
+        val session = ConversationSession(id, Conversation.ofId(id), this, store, {})
+        session.initialize(load = { null }, create = { Conversation.ofId(id) })
+        session.update {
+            it.updateCurrentMessages(listOf(UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Image("data:image/png;base64,cHJldmlldw==")),
+            )))
+        }
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            withGenerationCleanup(block = { awaitCancellation() }, cleanup = {
+                session.finishGeneration { it.copy(url = "file:///preview.png") }
+            })
+        }
+        job.cancel()
+        job.join()
+
+        assertTrue(job.isCancelled)
+        assertEquals(
+            "file:///preview.png",
+            (store.persisted!!.currentMessages.single().parts.single() as UIMessagePart.Image).url,
+        )
+    }
+
     @Test
     fun `metadata edits survive reopening and final generation save`() = runBlocking {
         val id = Uuid.random()

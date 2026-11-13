@@ -577,7 +577,20 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     private fun parseMessageParts(parts: JsonArray?): List<UIMessagePart> = buildList {
         parts.orEmpty().forEachIndexed { index, element ->
-            val part = parseMessagePart(element.jsonObject, index)
+            val rawPart = element.jsonObject
+            // Standalone thoughtSignature-only part: attach signature to previous part when possible
+            if (!rawPart.hasKnownContentKey() && rawPart.containsKey("thoughtSignature")) {
+                val signatureMetadata = rawPart.toGoogleThoughtMetadata()
+                if (signatureMetadata != null && isNotEmpty()) {
+                    val lastIndex = lastIndex
+                    val updated = get(lastIndex).withMergedGoogleMetadata(signatureMetadata)
+                    if (updated != null) {
+                        set(lastIndex, updated)
+                        return@forEachIndexed
+                    }
+                }
+            }
+            val part = parseMessagePart(rawPart, index)
             if (part !is UIMessagePart.ServerTool) {
                 add(part)
                 return@forEachIndexed
@@ -689,6 +702,24 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         .takeIf { thoughtSignature != null }
                         ?.toMetadata()
                 )
+            }
+
+            jsonObject.containsKey("thoughtSignature") -> {
+                val thought = jsonObject["thought"]?.jsonPrimitive?.booleanOrNull ?: false
+                val metadata = jsonObject.toGoogleThoughtMetadata()
+                if (thought) {
+                    UIMessagePart.Reasoning(
+                        reasoning = "",
+                        createdAt = Clock.System.now(),
+                        finishedAt = null,
+                        metadata = metadata,
+                    )
+                } else {
+                    UIMessagePart.Text(
+                        text = "",
+                        metadata = metadata,
+                    )
+                }
             }
 
             else -> error("unknown message part type: $jsonObject")
@@ -931,6 +962,21 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             metadata?.call?.let(::add)
             metadata?.result?.let(::add)
         }
+    }
+
+    private fun JsonObject.hasKnownContentKey(): Boolean =
+        containsKey("text") ||
+            containsKey("functionCall") ||
+            containsKey("toolCall") ||
+            containsKey("toolResponse") ||
+            containsKey("inlineData")
+
+    private fun UIMessagePart.withMergedGoogleMetadata(extra: JsonObject): UIMessagePart? = when (this) {
+        is UIMessagePart.Text -> copy(metadata = mergeGoogleMetadata(metadata, extra))
+        is UIMessagePart.Reasoning -> copy(metadata = mergeGoogleMetadata(metadata, extra))
+        is UIMessagePart.Tool -> copy(metadata = mergeGoogleMetadata(metadata, extra))
+        is UIMessagePart.Image -> copy(metadata = mergeGoogleMetadata(metadata, extra))
+        else -> null
     }
 
     private fun JsonObject.toGoogleThoughtMetadata() =

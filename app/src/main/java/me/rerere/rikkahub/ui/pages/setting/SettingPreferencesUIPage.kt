@@ -244,6 +244,12 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_thinking_title)) },
                     )
                     switchItem(
+                        checked = displaySetting.enableMarkdownRendering,
+                        onCheckedChange = { updateDisplaySetting(displaySetting.copy(enableMarkdownRendering = it)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_markdown_rendering_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_markdown_rendering_title)) },
+                    )
+                    switchItem(
                         checked = displaySetting.enableLatexRendering,
                         onCheckedChange = { updateDisplaySetting(displaySetting.copy(enableLatexRendering = it)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_desc)) },

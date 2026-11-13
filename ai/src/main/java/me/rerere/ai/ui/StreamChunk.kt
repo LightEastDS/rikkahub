@@ -139,6 +139,7 @@ sealed class StreamChunk {
     data class ImageSnapshot(
         val id: String,
         val data: String,
+        val mimeType: String? = null,
         val metadata: JsonObject? = null,
     ) : StreamChunk()
 

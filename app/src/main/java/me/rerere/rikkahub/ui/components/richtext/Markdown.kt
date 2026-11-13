@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,11 +40,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +73,7 @@ import me.rerere.bettertext.markdown.MarkdownComponents
 import me.rerere.bettertext.markdown.MarkdownInline
 import me.rerere.bettertext.markdown.plainText
 import me.rerere.bettertext.text.BetterInline
+import me.rerere.bettertext.text.BetterText
 import me.rerere.bettertext.text.ComposableInline
 import me.rerere.bettertext.text.DrawnInline
 import me.rerere.bettertext.text.InlineAlign
@@ -126,6 +130,37 @@ private fun MarkdownPreview() {
                 )
             }
         }
+    }
+}
+
+/**
+ * 根据显示设置渲染 Markdown 或纯文本。
+ * 适用于聊天消息、思考过程等用户可关闭 Markdown 渲染的场景。
+ */
+@Composable
+fun MessageMarkdownBlock(
+    content: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    streaming: Boolean = false,
+    onClickCitation: (String) -> Unit = {}
+) {
+    if (LocalSettings.current.displaySetting.enableMarkdownRendering) {
+        MarkdownBlock(
+            content = content,
+            modifier = modifier,
+            style = style,
+            streaming = streaming,
+            onClickCitation = onClickCitation,
+        )
+    } else {
+        val merged = LocalTextStyle.current.merge(style)
+        val resolved = merged.copy(color = merged.color.takeOrElse { LocalContentColor.current })
+        BetterText(
+            text = remember(content) { AnnotatedString(content) },
+            modifier = modifier.padding(horizontal = 4.dp),
+            style = resolved,
+        )
     }
 }
 

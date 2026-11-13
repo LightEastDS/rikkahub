@@ -6,9 +6,6 @@ import android.net.Uri
 import android.util.Log
 import androidx.core.net.toFile
 import androidx.core.net.toUri
-import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -23,6 +20,9 @@ import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.exportImageFile
 import me.rerere.rikkahub.utils.getActivity
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -175,34 +175,33 @@ class FilesManager(
         return newUris
     }
 
-    @OptIn(ExperimentalEncodingApi::class)
     suspend fun convertBase64ImagePartToLocalFile(message: UIMessage): UIMessage =
         withContext(Dispatchers.IO) {
             message.copy(
-                parts = message.parts.map { part ->
-                    when (part) {
-                        is UIMessagePart.Image -> {
-                            if (part.url.startsWith("data:image")) {
-                                val sourceByteArray = Base64.decode(part.url.substringAfter("base64,").toByteArray())
-                                val bitmap = BitmapFactory.decodeByteArray(sourceByteArray, 0, sourceByteArray.size)
-                                val byteArray = FileUtils.compressBitmapToPng(bitmap)
-                                val urls = createChatFilesByByteArrays(listOf(byteArray))
-                                Log.i(
-                                    TAG,
-                                    "convertBase64ImagePartToLocalFile: convert base64 img to ${urls.joinToString(", ")}"
-                                )
-                                part.copy(
-                                    url = urls.first().toString(),
-                                )
-                            } else {
-                                part
-                            }
-                        }
-
-                        else -> part
-                    }
+                parts = message.parts.mapNotNull { part ->
+                    if (part is UIMessagePart.Image) persistGeneratedImage(part) else part
                 }
             )
+        }
+
+    /** 空占位不是图片；失败或取消时也调用这里，避免把 data URL 直接写入数据库。 */
+    suspend fun persistGeneratedImage(part: UIMessagePart.Image): UIMessagePart.Image? =
+        withContext(Dispatchers.IO) {
+            if (!part.url.startsWith("data:")) return@withContext part
+            val bytes = decodeGeneratedImage(part.url) ?: return@withContext null
+            // 只读图片头校验，原样保存编码数据，避免大图展开为 Bitmap 后再编码导致内存暴涨。
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            check(options.outWidth > 0 && options.outHeight > 0) {
+                "Generated image data could not be decoded"
+            }
+            val mimeType = options.outMimeType ?: "image/png"
+            val uri = createChatFilesByByteArrays(
+                listOf(bytes),
+                displayName = "image.${mimeType.substringAfter('/')}",
+                mimeType = mimeType,
+            ).first()
+            part.copy(url = uri.toString())
         }
 
     fun deleteChatFiles(uris: List<Uri>) {
@@ -340,7 +339,7 @@ class FilesManager(
         var inserted = 0
         val diskRelativePaths = HashSet<String>()
         diskFiles.forEach { file ->
-            val relativePath = "${folder}/${file.name}"
+            val relativePath = "$folder/${file.name}"
             diskRelativePaths.add(relativePath)
             val existing = repository.getByPath(relativePath)
             if (existing == null) {

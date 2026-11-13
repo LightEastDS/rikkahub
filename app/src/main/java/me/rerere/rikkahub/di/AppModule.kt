@@ -1,13 +1,11 @@
 package me.rerere.rikkahub.di
 
-import com.google.firebase.Firebase
-import com.google.firebase.analytics.analytics
-import com.google.firebase.crashlytics.crashlytics
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.ChatRequestFactory
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.datastore.ChatDraftStore
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.phoneuse.PhoneUseManager
 import me.rerere.rikkahub.service.BackgroundShellManager
@@ -17,11 +15,13 @@ import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.MediaCreationService
 import me.rerere.rikkahub.ui.floating.ChatFloatingWindows
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalSessionManager
+import me.rerere.rikkahub.utils.AppAnalytics
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.SoundEffectPlayer
 import me.rerere.rikkahub.utils.UpdateChecker
+import me.rerere.rikkahub.utils.createAppAnalytics
 import me.rerere.rikkahub.web.WebServerManager
 import me.rerere.tts.provider.TTSManager
 import org.koin.dsl.module
@@ -31,6 +31,10 @@ val appModule = module {
 
     single {
         AppEventBus()
+    }
+
+    single {
+        ChatDraftStore(context = get(), json = get())
     }
 
     single {
@@ -60,12 +64,8 @@ val appModule = module {
         TTSManager(get())
     }
 
-    single {
-        Firebase.crashlytics
-    }
-
-    single {
-        Firebase.analytics
+    single<AppAnalytics> {
+        createAppAnalytics()
     }
 
     single {
@@ -158,6 +158,7 @@ val appModule = module {
             folderRepository = get(),
             checkpointRepository = get(),
             backgroundShellManager = get(),
+            chatDraftStore = get(),
         )
     }
 

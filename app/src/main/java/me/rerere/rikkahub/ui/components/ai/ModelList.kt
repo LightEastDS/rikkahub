@@ -224,7 +224,7 @@ internal fun ModelSelectorButton(
                 }
                 Text(
                     text = model?.displayName ?: stringResource(R.string.model_list_select_model),
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -294,7 +294,7 @@ internal fun ModelField(
             Text(
                 text = model?.displayName ?: placeholder,
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
@@ -828,7 +828,7 @@ private fun ModelItem(
                     Text(
                         text = model.displayName,
                         style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
 

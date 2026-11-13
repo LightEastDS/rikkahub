@@ -25,6 +25,7 @@ import kotlin.math.roundToInt
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.AUTO_COMPRESS_THRESHOLD_RANGE
 import me.rerere.rikkahub.data.datastore.BackgroundEffectType
+import me.rerere.rikkahub.data.datastore.ChatDraftStore
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
@@ -36,6 +37,7 @@ import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 @Composable
 fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
@@ -50,6 +52,7 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
         vm.updateSettings { it.copy(displaySetting = setting) }
     }
 
+    val chatDraftStore = koinInject<ChatDraftStore>()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -90,6 +93,17 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         onCheckedChange = { updateDisplaySetting(displaySetting.copy(sendOnEnter = it)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_title)) },
+                    )
+                    switchItem(
+                        checked = displaySetting.keepInputDraft,
+                        onCheckedChange = { enabled ->
+                            updateDisplaySetting(displaySetting.copy(keepInputDraft = enabled))
+                            if (!enabled) {
+                                chatDraftStore.clearAll()
+                            }
+                        },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_keep_input_draft_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_keep_input_draft_title)) },
                     )
                 }
             }

@@ -357,7 +357,9 @@ private fun FileContentPreview(
 
     val language = remember(path) { languageOf(path) }
     val isMarkdown = language == "markdown"
-    var renderMarkdown by remember(isMarkdown) { mutableStateOf(isMarkdown) }
+    var renderMarkdown by remember(isMarkdown, settings.displaySetting.enableMarkdownRendering) {
+        mutableStateOf(isMarkdown && settings.displaySetting.enableMarkdownRendering)
+    }
     var autoWrap by remember { mutableStateOf(true) }
     val effectiveSettings = remember(settings, autoWrap) {
         settings.copy(

@@ -87,7 +87,7 @@ import me.rerere.rikkahub.data.repository.StPresetRepository
 import me.rerere.rikkahub.data.stpreset.StPreset
 import me.rerere.rikkahub.data.stpreset.StRegexPipeline
 import org.koin.compose.koinInject
-import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.richtext.MessageMarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
@@ -483,7 +483,7 @@ private fun MessagePartsBlock(
                                         .padding(start = 24.dp)
                                         .animateContentSize(),
                                 ) {
-                                    MarkdownBlock(
+                                    MessageMarkdownBlock(
                                         content = displayContent,
                                         onClickCitation = handleClickCitation
                                     )
@@ -495,14 +495,14 @@ private fun MessagePartsBlock(
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
                                         modifier = Modifier.animateContentSize(),
                                     ) {
-                                        MarkdownBlock(
+                                        MessageMarkdownBlock(
                                             content = displayContent,
                                             streaming = streamingText,
                                             onClickCitation = handleClickCitation,
                                         )
                                     }
                                 } else {
-                                    MarkdownBlock(
+                                    MessageMarkdownBlock(
                                         content = displayContent,
                                         streaming = streamingText,
                                         onClickCitation = handleClickCitation,

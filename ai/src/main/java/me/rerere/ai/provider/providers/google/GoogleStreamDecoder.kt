@@ -177,6 +177,14 @@ internal class GoogleStreamDecoder(
                 )
             }
         }
+        part.containsKey("thoughtSignature") -> {
+            val metadata = part.toGoogleThoughtMetadata()
+            if (part["thought"]?.jsonPrimitive?.booleanOrNull == true) {
+                UIMessagePart.Reasoning("", Clock.System.now(), null, metadata)
+            } else {
+                UIMessagePart.Text("", metadata)
+            }
+        }
         else -> error("unknown message part type: $part")
     }
 
@@ -215,22 +223,38 @@ internal class GoogleStreamDecoder(
             var emittedImages = 0
             message.parts.forEach { part ->
                 when (part) {
-                    is UIMessagePart.Text -> if (part.text.isNotEmpty() || (part.metadata != null && textId != null)) {
-                        addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
+                    is UIMessagePart.Text -> if (part.text.isNotEmpty()) {
+                        addAll(closeReasoning())
+                        addAll(closeImage())
+                        addAll(closeTools())
                         val id = textId ?: nextId(responseId, "text").also {
-                            textId = it; add(StreamChunk.TextStart(it, part.metadata))
+                            textId = it
+                            add(StreamChunk.TextStart(it, part.metadata))
                         }
                         add(StreamChunk.TextDelta(id, part.text, part.metadata))
+                    } else if (part.metadata != null) {
+                        when {
+                            textId != null -> add(StreamChunk.TextDelta(textId!!, "", part.metadata))
+                            openToolIds.isNotEmpty() -> add(
+                                StreamChunk.ToolCallDelta(openToolIds.last(), metadata = part.metadata)
+                            )
+                            reasoningId != null -> add(StreamChunk.ReasoningDelta(reasoningId!!, "", part.metadata))
+                        }
                     }
                     is UIMessagePart.Reasoning -> if (part.reasoning.isNotEmpty() || part.metadata != null) {
-                        addAll(closeText()); addAll(closeImage()); addAll(closeTools())
+                        addAll(closeText())
+                        addAll(closeImage())
+                        addAll(closeTools())
                         val id = reasoningId ?: nextId(responseId, "reasoning").also {
-                            reasoningId = it; add(StreamChunk.ReasoningStart(it, part.metadata))
+                            reasoningId = it
+                            add(StreamChunk.ReasoningStart(it, part.metadata))
                         }
                         add(StreamChunk.ReasoningDelta(id, part.reasoning, part.metadata))
                     }
                     is UIMessagePart.Tool -> {
-                        addAll(closeText()); addAll(closeReasoning()); addAll(closeImage())
+                        addAll(closeText())
+                        addAll(closeReasoning())
+                        addAll(closeImage())
                         val id = part.toolCallId.ifBlank { nextId(responseId, "tool") }
                         if (openToolIds.add(id)) add(StreamChunk.ToolCallStart(id, part.toolName, part.metadata))
                         if (part.input.isNotEmpty()) {
@@ -238,7 +262,10 @@ internal class GoogleStreamDecoder(
                         }
                     }
                     is UIMessagePart.ServerTool -> {
-                        addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(
+                        addAll(closeText())
+                        addAll(closeReasoning())
+                        addAll(closeImage())
+                        addAll(
                             closeTools()
                         )
                         if (part.status == ServerToolStatus.IN_PROGRESS) {
@@ -263,7 +290,9 @@ internal class GoogleStreamDecoder(
                         }
                     }
                     is UIMessagePart.Image -> {
-                        addAll(closeText()); addAll(closeReasoning()); addAll(closeTools())
+                        addAll(closeText())
+                        addAll(closeReasoning())
+                        addAll(closeTools())
                         if (imageCount > 1 && emittedImages > 0) addAll(closeImage())
                         val id = imageId ?: nextId(responseId, "image").also {
                             imageId = it
@@ -283,15 +312,25 @@ internal class GoogleStreamDecoder(
         }
 
         fun finish(reason: String?, responseId: String, model: String): List<StreamChunk> = buildList {
-            addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
+            addAll(closeText())
+            addAll(closeReasoning())
+            addAll(closeImage())
+            addAll(closeTools())
             add(StreamChunk.Finish(reason, responseId, model))
         }
 
-        private fun closeText() = textId?.let { textId = null; listOf(StreamChunk.TextEnd(it)) }.orEmpty()
-        private fun closeReasoning() = reasoningId?.let {
-            reasoningId = null; listOf(StreamChunk.ReasoningEnd(it))
+        private fun closeText() = textId?.let {
+            textId = null
+            listOf(StreamChunk.TextEnd(it))
         }.orEmpty()
-        private fun closeImage() = imageId?.let { imageId = null; listOf(StreamChunk.ImageEnd(it)) }.orEmpty()
+        private fun closeReasoning() = reasoningId?.let {
+            reasoningId = null
+            listOf(StreamChunk.ReasoningEnd(it))
+        }.orEmpty()
+        private fun closeImage() = imageId?.let {
+            imageId = null
+            listOf(StreamChunk.ImageEnd(it))
+        }.orEmpty()
         private fun closeTools() = openToolIds.toList().map { StreamChunk.ToolCallEnd(it) }.also {
             openToolIds.clear()
         }

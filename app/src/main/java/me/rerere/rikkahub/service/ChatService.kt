@@ -50,10 +50,12 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.prompts.buildCompressPrompt
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
+import me.rerere.rikkahub.data.datastore.ChatDraftStore
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
@@ -67,7 +69,6 @@ import me.rerere.rikkahub.data.model.deleteMessageNodes
 import me.rerere.rikkahub.data.model.editMessage
 import me.rerere.rikkahub.data.model.fillModelSnapshots
 import me.rerere.rikkahub.data.model.fork
-import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.model.getStoredAssistantOf
@@ -84,7 +85,6 @@ import me.rerere.rikkahub.data.model.withToolApproval
 import me.rerere.rikkahub.data.model.withTranslation
 import me.rerere.rikkahub.data.model.withoutConversationFields
 import me.rerere.rikkahub.data.model.withoutUnresumableToolCalls
-import me.rerere.rikkahub.data.db.entity.ConversationCheckpointEntity
 import me.rerere.rikkahub.data.repository.ConversationCheckpointRepository
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -143,6 +143,7 @@ class ChatService(
     private val folderRepository: FolderRepository,
     private val checkpointRepository: ConversationCheckpointRepository,
     private val backgroundShellManager: BackgroundShellManager,
+    private val chatDraftStore: ChatDraftStore,
 ) {
     /** 一次 agent 运行发给模型的消息，和回复要写进的节点 */
     private class ReplyTarget(val history: List<UIMessage>, val nodeId: Uuid) {
@@ -763,7 +764,7 @@ class ChatService(
             // 上一段是压缩后新开的；摘要加系统提示词本身就超过阈值时再压也没用，这一轮不再压缩
             var afterCompression = false
             var compressionUseless = false
-            try {
+            withGenerationCleanup(block = {
                 while (true) {
                     val replyNodeId = target.nodeId
                     val freshReply = afterCompression
@@ -824,11 +825,11 @@ class ChatService(
                     target = replyTargetOf(session.state.value, regenerateNodeId = null)
                     session.replyMessageId.value = target.continuedMessageId
                 }
-            } finally {
+            }, cleanup = {
                 withContext(NonCancellable) {
                     session.processingStatus.value = null
                     // 可能被取消了，或者意外结束，兜底保存
-                    val finished = session.finishGeneration()
+                    val finished = session.finishGeneration(filesManager::persistGeneratedImage)
                     // 生成结束：取消 Live Update 通知，后台时发送完成通知
                     appEventBus.emit(
                         AppEvent.ChatGenerationEnded(
@@ -839,7 +840,7 @@ class ChatService(
                         )
                     )
                 }
-            }
+            })
 
             val reason = checkNotNull(finishReason)
             // 等待审批时这一轮还没结束，标题、建议和记忆整理等审批之后再做
@@ -1098,7 +1099,7 @@ class ChatService(
         val reply = session.state.value.currentMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
         session.autoCompressedReplyId = reply?.id
         // 压缩前把已经生成的内容存下来
-        session.finishGeneration()
+        session.finishGeneration(filesManager::persistGeneratedImage)
         session.setActivity(SessionActivity.Compressing)
         session.processingStatus.value = context.getString(R.string.chat_page_compressing)
         return try {
@@ -1407,6 +1408,7 @@ class ChatService(
             previous?.let { filesManager.deleteChatFiles(it.files) }
         }
         sessionManager.removeIfIdle(session)
+        chatDraftStore.remove(conversationId)
         // 后台命令随会话一起终止, 撤销删除也不会恢复; 终止要等宽限期, 不阻塞删除
         appScope.launch { backgroundShellManager.killConversation(conversationId) }
     }
@@ -1508,11 +1510,17 @@ class ChatService(
                     messageNodes = rawFork.messageNodes.mapIndexed { idx, node ->
                         if (idx in autoHiddenIndices) {
                             node.copy(messages = node.messages.map { it.copy(isHidden = false) })
-                        } else node
+                        } else {
+                            node
+                        }
                     }
                 )
-            } else rawFork
-        } else rawFork
+            } else {
+                rawFork
+            }
+        } else {
+            rawFork
+        }
         // 新会话直接落库，打开时再从数据库加载
         val forkConversation = conversationStore.prepareWrite()(fork)
         conversationRepo.insertConversation(forkConversation)
@@ -1745,14 +1753,15 @@ class ChatService(
             return HideCommandResult(false, "未找到有效楼层进行操作（当前会话共 $totalFloors 层）")
         }
         val actionDesc = if (isHide) "隐藏" else "取消隐藏"
-        return HideCommandResult(true, "已${actionDesc} ${affectedCount} 层消息上下文", affectedCount)
+        return HideCommandResult(true, "已$actionDesc $affectedCount 层消息上下文", affectedCount)
     }
 
     companion object {
         val HIDE_CMD_REGEX = Regex("""^/(hide|unhide|show)\b(.*)$""", RegexOption.IGNORE_CASE)
         val COMPACT_CMD_REGEX = Regex("""^/compact\b(.*)$""", RegexOption.IGNORE_CASE)
         val COMPACT_WITHDRAW_REGEX = Regex("""^/compact\s+withdraw\s*$""", RegexOption.IGNORE_CASE)
-        val COMPACT_ARGS_REGEX = Regex("""^/compact\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(hide))?\s*$""", RegexOption.IGNORE_CASE)
+        val COMPACT_ARGS_REGEX =
+            Regex("""^/compact\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(hide))?\s*$""", RegexOption.IGNORE_CASE)
         private val RANGE_TOKEN_REGEX = Regex("""(\d+)(?:\s*-\s*(\d+))?""")
 
         fun isHideCommand(text: String): Boolean {
@@ -1772,7 +1781,9 @@ class ChatService(
             checkpoint.autoHiddenFloors.split(",")
                 .mapNotNull { it.trim().toIntOrNull() }
                 .toSet()
-        } else emptySet()
+        } else {
+            emptySet()
+        }
 
         if (restoredFloors.isNotEmpty()) {
             mutate(conversationId) { conv ->
@@ -1781,7 +1792,9 @@ class ChatService(
                     messageNodes = conv.messageNodes.mapIndexed { idx, node ->
                         if (idx in indicesToRestore) {
                             node.copy(messages = node.messages.map { it.copy(isHidden = false) })
-                        } else node
+                        } else {
+                            node
+                        }
                     }
                 )
             }
@@ -1864,7 +1877,9 @@ class ChatService(
                         messageNodes = conv.messageNodes.mapIndexed { idx, node ->
                             if (idx in validIndices) {
                                 node.copy(messages = node.messages.map { it.copy(isHidden = true) })
-                            } else node
+                            } else {
+                                node
+                            }
                         }
                     )
                 }

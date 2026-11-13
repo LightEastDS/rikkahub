@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.TokenUsage
@@ -126,13 +127,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                         state.reasoningMetadata[id] = metadata
                         state.endReasoningItem(id, metadata)
                     }
-                    "image_generation_call" -> buildList {
-                        addAll(state.startImage(id))
-                        item["result"]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotEmpty)?.let {
-                            add(StreamChunk.ImageSnapshot(id, it))
-                        }
-                        addAll(state.endImage(id))
-                    }
+                    "image_generation_call" -> completeImage(item)
                     "function_call" -> state.endTool(state.toolCallIdsByItemId.remove(id) ?: id)
                     "function_call_output" -> functionCallOutput(item)
                     else -> if (isOpenAIServerToolCall(type)) {
@@ -173,6 +168,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                     add(StreamChunk.ImageSnapshot(
                         requiredItemId,
                         payload["partial_image_b64"]?.jsonPrimitive?.contentOrNull ?: "",
+                        mimeType = payload.imageGenerationMimeType(),
                     ))
                 }
             }
@@ -213,6 +209,13 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         }
 
         return buildList {
+            // 完整响应也包含最终图片；仅补收尚未由 output_item.done 收到的结果，避免重复图片。
+            response?.get("output")?.jsonArray.orEmpty().forEach { output ->
+                val item = output.jsonObject
+                if (item["type"]?.jsonPrimitive?.contentOrNull == "image_generation_call") {
+                    addAll(completeImage(item))
+                }
+            }
             parseUsage(response?.get("usage") as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
             addAll(state.finish(
                 finishReason = finishReason,
@@ -220,6 +223,16 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 model = response?.get("model")?.jsonPrimitive?.contentOrNull,
             ))
         }
+    }
+
+    private fun completeImage(item: JsonObject): List<StreamChunk> {
+        val id = item["id"]?.jsonPrimitive?.contentOrNull ?: error("image generation id not found")
+        val data = item["result"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: return emptyList()
+        if (!state.completedImageIds.add(id)) return emptyList()
+        return state.startImage(id) +
+            StreamChunk.ImageSnapshot(id, data, mimeType = item.imageGenerationMimeType()) +
+            state.endImage(id)
     }
 
     private fun failWithResponseError(payload: JsonObject): Nothing {
@@ -266,6 +279,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         val toolCallIdsByOutputIndex = mutableMapOf<Int, String>()
         val toolIdsWithInput = mutableSetOf<String>()
         val reasoningMetadata = mutableMapOf<String, JsonObject>()
+        val completedImageIds = mutableSetOf<String>()
 
         // 文本 id（item:text:index）到当前 part id。xAI 在服务端工具前后都往同一个 message item 写正文，
         // 中间插进了其他 part 时要另起一段，part 才能按生成顺序排列

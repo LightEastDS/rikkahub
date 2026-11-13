@@ -344,6 +344,16 @@
      - 保留全部本地定制增强（ST 预设兼容、角色卡世界书导入、`/compact` 压缩与展开管理、`/hide` 与 `/unhide` 楼层管理、工具输出防截断、输入转文件发送、楼层轮次与智能字数统计等）；
      - 继续执行纯净化改造：剔除上游新增内置及推荐赞助商中转（`STA1N API🍪`、`钠API` 等）并在 `SettingsNormalization` 中加入启动自动过滤清洗。
   2. **版本号升级**：升至 `3.2.0.1`（versionCode: 210）。
+* **v3.2.0.2**：
+  1. **问题修复与功能优化**：
+     - **修复工作区文件编辑器崩溃与新增 Markdown 渲染开关**（#25）：修复 `WorkspaceFileEditorPage` 使用 `IntrinsicSize.Max` 引发的布局测量崩溃；在设置与 `.md` 文件预览中新增 Markdown 渲染开关。
+     - **调整新建助手的 Gemini 工具输出默认开关**（#26）：将 `Assistant.geminiToolOutput` 默认值由 `true` 改为 `false`，避免新建助手默认触发不兼容的工具输出封装行为。
+     - **支持按对话保留聊天输入框草稿**（#27）：新增 `ChatDraftStore` 按对话持久化未发送输入草稿，并在通用设置中新增 `keepInputDraft` 开关控制。
+     - **优化模型名称多行显示**（#2320）：在 `ModelSelectorButton`、`ModelField`、`ModelItem` 及聊天页 `ChatPage` 顶部栏副标题中允许模型名称最多 2 行展示（`maxLines = 2`），避免长模型名称被过早截断。
+     - **修复 Gemini 独立 `thoughtSignature` 响应片段解析**（#2316）：完善 `GoogleProvider` 与 `GoogleStreamDecoder` 对仅包含 `thoughtSignature`、不携带文本或工具调用负载片段的处理与回传。
+     - **修复 OpenAI Responses API 内置生图显示与持久化**（#2311）：支持流式与非流式 `image_generation_call` 局部/终态图像解析，完善 Base64 图像转存本地文件（`FilesManager.persistGeneratedImage`）、流式空占位清理及 `withGenerationCleanup` 异常隔离逻辑。
+     - **修复 GitHub 构建版启动弹出启用 Google Play 服务提示**（#2313）：通过 `AppAnalytics` 按 flavor 隔离 Firebase Analytics / Crashlytics 初始化与上报（`github` flavor 为空实现且不引入 GMS / Firebase 依赖，`play` flavor 保持原有实现）。
+  2. **版本号升级**：升至 `3.2.0.2`（versionCode: 211）。
 
 
 

@@ -124,7 +124,7 @@
   <string name="assistant_page_stream_output">Stream Output</string>
   <string name="assistant_page_stream_output_desc">Whether to enable streaming output for messages</string>
   <string name="assistant_page_gemini_tool_output">Tool Output (Anti-Truncation)</string>
-  <string name="assistant_page_gemini_tool_output_desc">Output responses via a document creation tool by default to prevent truncation and empty replies</string>
+  <string name="assistant_page_gemini_tool_output_desc">Output responses via a document creation tool to prevent truncation and empty replies</string>
   <string name="assistant_page_send_input_as_file">Send Input as File</string>
   <string name="assistant_page_send_input_as_file_desc">Convert user text messages into file attachments (user_input.txt) when sending to bypass input censorship and reduce empty replies</string>
   <string name="assistant_page_strict">Strict</string>
@@ -694,6 +694,8 @@
   <string name="setting_display_page_enable_blur_effect_title">Enable Blur Effect</string>
   <string name="setting_display_page_enable_latex_rendering_desc">Render mathematical expressions and formulas using LaTeX syntax</string>
   <string name="setting_display_page_enable_latex_rendering_title">Enable LaTeX Rendering</string>
+  <string name="setting_display_page_enable_markdown_rendering_desc">Render chat messages, reasoning, and Markdown documents with rich formatting</string>
+  <string name="setting_display_page_enable_markdown_rendering_title">Enable Markdown Rendering</string>
   <string name="setting_display_page_enable_message_generation_haptic_effect_desc">Enable haptic feedback when messages are being generated</string>
   <string name="setting_display_page_enable_message_generation_haptic_effect_title">Message Generation Haptic Effect</string>
   <string name="setting_display_page_font_size_preview">At four in the morning, I saw the begonia flowers still awake. I am often like this — lying awake alone in the quiet night, thinking: if someone is thinking of me at this moment, that would be wonderful.</string>
@@ -709,6 +711,8 @@
   <string name="setting_display_page_paste_long_text_threshold_title">Text Length Threshold</string>
   <string name="setting_display_page_send_on_enter_desc">Press Enter to send message instead of adding a new line</string>
   <string name="setting_display_page_send_on_enter_title">Send on Enter</string>
+  <string name="setting_display_page_keep_input_draft_desc">Save unsent text and attachments per conversation when switching chats</string>
+  <string name="setting_display_page_keep_input_draft_title">Keep Input Draft</string>
   <string name="setting_display_page_show_assistant_bubble_desc">Whether to show bubble background for assistant messages</string>
   <string name="setting_display_page_show_assistant_bubble_title">Show Assistant Message Bubble</string>
   <string name="setting_display_page_show_datetime_in_message_desc">Show date and time below each message</string>
@@ -1900,6 +1904,7 @@
   <string name="workspace_editor_preview">Preview</string>
   <string name="workspace_editor_source">Source</string>
   <string name="workspace_editor_auto_wrap">Word Wrap</string>
+  <string name="workspace_editor_markdown">Markdown</string>
   <string name="background_tasks_running">Background tasks: %1$d running</string>
   <string name="background_tasks_title">Background tasks</string>
   <string name="background_tasks_empty">No background tasks in this conversation</string>

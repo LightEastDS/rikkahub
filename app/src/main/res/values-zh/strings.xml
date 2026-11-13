@@ -124,7 +124,7 @@
   <string name="assistant_page_stream_output">流式输出</string>
   <string name="assistant_page_stream_output_desc">是否启用消息的流式输出</string>
   <string name="assistant_page_gemini_tool_output">工具输出 (防截断)</string>
-  <string name="assistant_page_gemini_tool_output_desc">默认通过创建文档工具输出回复，大幅降低模型截断与空回概率</string>
+  <string name="assistant_page_gemini_tool_output_desc">通过创建文档工具输出回复，大幅降低模型截断与空回概率</string>
   <string name="assistant_page_send_input_as_file">以文件方式发送输入</string>
   <string name="assistant_page_send_input_as_file_desc">发送请求时自动将用户文本转为文件附件 (user_input.txt)，降低输入审查拦截与空回概率</string>
   <string name="assistant_page_strict">严谨</string>
@@ -687,6 +687,8 @@
   <string name="setting_display_page_enable_blur_effect_title">启用模糊效果</string>
   <string name="setting_display_page_enable_latex_rendering_desc">使用 LaTeX 语法渲染数学表达式和公式</string>
   <string name="setting_display_page_enable_latex_rendering_title">启用 LaTeX 渲染</string>
+  <string name="setting_display_page_enable_markdown_rendering_desc">使用富文本格式渲染聊天消息、思考过程与 Markdown 文档</string>
+  <string name="setting_display_page_enable_markdown_rendering_title">启用 Markdown 渲染</string>
   <string name="setting_display_page_enable_message_generation_haptic_effect_desc">消息生成时启用触觉反馈效果</string>
   <string name="setting_display_page_enable_message_generation_haptic_effect_title">消息生成触觉反馈</string>
   <string name="setting_display_page_font_size_preview">凌晨四点钟，看到海棠花未眠。我常常这样，在无人的夜里独自醒着，想，若有人此刻也在想我，那就好了。</string>
@@ -702,6 +704,8 @@
   <string name="setting_display_page_paste_long_text_threshold_title">文本长度阈值</string>
   <string name="setting_display_page_send_on_enter_desc">按 Enter 发送消息而非换行</string>
   <string name="setting_display_page_send_on_enter_title">按Enter发送</string>
+  <string name="setting_display_page_keep_input_draft_desc">切换对话时按会话保存未发送的输入内容和附件</string>
+  <string name="setting_display_page_keep_input_draft_title">保留输入草稿</string>
   <string name="setting_display_page_show_assistant_bubble_desc">是否为助手消息显示气泡背景</string>
   <string name="setting_display_page_show_assistant_bubble_title">显示助手消息气泡</string>
   <string name="setting_display_page_show_datetime_in_message_desc">在每条消息下方显示日期和时间</string>
@@ -1902,6 +1906,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_editor_preview">预览</string>
   <string name="workspace_editor_source">源码</string>
   <string name="workspace_editor_auto_wrap">自动换行</string>
+  <string name="workspace_editor_markdown">Markdown 渲染</string>
   <string name="background_tasks_running">后台任务：%1$d 个运行中</string>
   <string name="background_tasks_title">后台任务</string>
   <string name="background_tasks_empty">此对话中没有后台任务</string>
