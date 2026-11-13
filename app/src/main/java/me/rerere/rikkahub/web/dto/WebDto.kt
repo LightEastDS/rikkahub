@@ -231,6 +231,9 @@ data class MessageDto(
     val modelSnapshot: ModelSnapshot? = null,
     val usage: TokenUsage? = null,
     val generationTimeMs: Long? = null,
+    // usage 是多步累计值，lastUsage 是最后一次请求自己的
+    val lastUsage: TokenUsage? = null,
+    val stepCount: Int? = null,
     val translation: String? = null,
     val isContextCheckpoint: Boolean = false,
     val isHidden: Boolean = false,
@@ -375,6 +378,8 @@ fun UIMessage.toDto() = MessageDto(
     modelSnapshot = modelSnapshot,
     usage = usage,
     generationTimeMs = generationTimeMs,
+    lastUsage = lastUsage,
+    stepCount = stepCount,
     translation = translation,
     isContextCheckpoint = isContextCheckpoint,
     isHidden = isHidden,

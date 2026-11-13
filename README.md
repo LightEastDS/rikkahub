@@ -51,6 +51,7 @@ Recommended: `app-arm64-v8a-release.apk` (for all modern Android devices).
 
 - 🎨 Material 3 Expressive design with predictive back gesture and 🌙 Dark Mode
 - 📦 Workspace: a PRoot-based Linux agent environment
+- 📱 Phone Use: let the AI operate your phone
 - 🎬 Media generation (image and video generation)
 - 🖥️ Web access: seamless multi-platform access via desktop browsers
 - 🛠️ MCP and Skills extensions support
