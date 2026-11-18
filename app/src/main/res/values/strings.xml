@@ -2044,4 +2044,13 @@
   <string name="quick_start_card_desc">RikkaHub needs a model provider to chat. Follow the quick start to set up a provider and default model, or migrate your chat history from DeepSeek.</string>
   <string name="setting_page_quick_start">Quick Start</string>
   <string name="setting_page_quick_start_desc">Set up providers and models step by step, or migrate from DeepSeek</string>
+  <string name="workspace_detail_prompt_title">Workspace prompt</string>
+  <string name="workspace_detail_prompt_desc">Controls the environment system prompt injected into conversations for this workspace</string>
+  <string name="workspace_detail_prompt_mode_default">Default</string>
+  <string name="workspace_detail_prompt_mode_custom">Custom</string>
+  <string name="workspace_detail_prompt_mode_disabled">Off</string>
+  <string name="workspace_detail_prompt_edit">Custom prompt</string>
+  <string name="workspace_detail_prompt_custom_empty">Not set yet. Tap to write a custom prompt (nothing is injected while empty)</string>
+  <string name="workspace_detail_prompt_fill_default">Fill default template</string>
+  <string name="workspace_detail_prompt_hint">Write your own workspace environment prompt to override the auto-detected distro, version, shell, and path hints.</string>
 </resources>

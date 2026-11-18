@@ -1932,4 +1932,13 @@
   <string name="quick_start_card_desc">يحتاج RikkaHub إلى مزوّد نماذج للدردشة. اتبع البدء السريع لإعداد مزوّد ونموذج افتراضي، أو انقل سجل محادثاتك من DeepSeek.</string>
   <string name="setting_page_quick_start">البدء السريع</string>
   <string name="setting_page_quick_start_desc">أعدّ المزوّدين والنماذج خطوة بخطوة، أو قم بالترحيل من DeepSeek</string>
+  <string name="workspace_detail_prompt_title">مطالبة مساحة العمل</string>
+  <string name="workspace_detail_prompt_desc">يتحكم في مطالبة نظام البيئة المُدرجة في المحادثات لهذه المساحة</string>
+  <string name="workspace_detail_prompt_mode_default">افتراضي</string>
+  <string name="workspace_detail_prompt_mode_custom">مخصص</string>
+  <string name="workspace_detail_prompt_mode_disabled">إيقاف</string>
+  <string name="workspace_detail_prompt_edit">مطالبة مخصصة</string>
+  <string name="workspace_detail_prompt_custom_empty">لم يتم التعيين بعد. انقر لكتابة مطالبة مخصصة (لن يتم حقن أي شيء إذا تُركت فارغة)</string>
+  <string name="workspace_detail_prompt_fill_default">ملء القالب الافتراضي</string>
+  <string name="workspace_detail_prompt_hint">اكتب وصف بيئة مساحة العمل الخاص بك لاستبدال التوزيعة والإصدار والصدفة والمسارات المكتشفة تلقائياً.</string>
 </resources>

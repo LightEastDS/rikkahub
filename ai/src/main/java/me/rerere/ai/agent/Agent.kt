@@ -20,6 +20,11 @@ data class AgentRequest(
     val providerSetting: ProviderSetting,
     val messages: List<UIMessage>,
     val tools: List<Tool> = emptyList(),
+    /**
+     * 仅用于运行时兜底执行的隐藏工具（不会写进请求参数发给模型）。
+     * 用于开启模型内置搜索后，模型仍按历史对话格式调用 `search_web` 等工具时的兼容执行。
+     */
+    val fallbackTools: List<Tool> = emptyList(),
     val stream: Boolean = true,
     /** 最多请求模型的次数 */
     val maxSteps: Int = 256,

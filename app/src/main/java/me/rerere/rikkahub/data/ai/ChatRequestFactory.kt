@@ -94,6 +94,7 @@ class ChatTurnContext(
     val workspaceCwd: String?,
     val memories: List<MemoryFile>,
     val tools: List<Tool>,
+    val fallbackTools: List<Tool> = emptyList(),
     /** 非空时聊天请求走 ST 预设组装器；为 null 时完全沿用旧路径。 */
     val stPreset: StPreset? = null,
     val checkpoint: ConversationCheckpointEntity? = null,
@@ -184,6 +185,11 @@ class ChatRequestFactory(
                 workspaceCwd = conversation.workspaceCwd,
                 useGeminiToolOutput = useGeminiToolOutput,
             ),
+            fallbackTools = chatToolFactory.createFallbackTools(
+                settings = settings,
+                assistant = assistant,
+                model = model,
+            ),
             stPreset = stPreset,
             checkpoint = checkpoint,
             milestoneMessageIds = milestoneMessageIds,
@@ -212,6 +218,7 @@ class ChatRequestFactory(
             providerSetting = turn.providerSetting,
             messages = messages,
             tools = turn.tools,
+            fallbackTools = turn.fallbackTools,
             stream = turn.assistant.streamOutput,
             retry = turn.settings.retryPolicy(),
         )

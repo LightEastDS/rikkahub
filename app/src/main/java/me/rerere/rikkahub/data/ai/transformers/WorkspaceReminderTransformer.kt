@@ -6,6 +6,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.db.entity.WorkspacePromptMode
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceLayout
 import me.rerere.workspace.WorkspaceManager
@@ -43,7 +44,56 @@ class WorkspaceReminderTransformer(
         // 与 ChatToolFactory.createWorkspaceToolsIfReady 保持一致: 仅在 shell 就绪时注入
         if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return null
         val layout = workspaceRepository.layout(workspaceId) ?: return null
+        return resolveWorkspacePrompt(
+            workspace = workspace,
+            defaultPrompt = { buildDefaultPrompt(workspace, layout, ctx.workspaceCwd) },
+            agentsPrompt = {
+                if (workspace.isSsh()) "" else buildAgentsPrompt(workspaceId, ctx.workspaceCwd)
+            },
+        )
+    }
 
+    /** 生成当前工作区的默认系统提示词文本，供自定义编辑器预填模板。 */
+    suspend fun buildDefaultPromptTemplate(workspaceId: String): String? {
+        val workspace = workspaceRepository.getById(workspaceId) ?: return null
+        val layout = workspaceRepository.layout(workspaceId) ?: return null
+        val ready = workspace.shellStatus == WorkspaceShellStatus.READY.name
+        return if (workspace.isSsh()) {
+            val env = if (ready) {
+                remoteEnvironments.get(workspaceId, workspace.sshConfig) {
+                    RemoteEnvironment(
+                        shell = workspaceRepository.shell(workspaceId),
+                        distro = readDistroName(workspaceId),
+                    )
+                }.getOrNull()
+            } else {
+                null
+            }
+            buildSshWorkspacePrompt(
+                workspace = workspace,
+                layout = layout,
+                shell = env?.shell ?: "/bin/sh",
+                distro = env?.distro,
+                cwd = null,
+            )
+        } else {
+            val shell = if (ready) workspaceRepository.shell(workspaceId) else "/bin/sh"
+            val distro = if (ready) readDistroName(workspaceId) else null
+            buildWorkspacePrompt(
+                workspace = workspace,
+                shell = shell,
+                distro = distro,
+                cwd = null,
+            )
+        }
+    }
+
+    private suspend fun buildDefaultPrompt(
+        workspace: WorkspaceEntity,
+        layout: WorkspaceLayout,
+        cwd: String?,
+    ): String {
+        val workspaceId = workspace.id
         return if (workspace.isSsh()) {
             val environment = remoteEnvironments.get(workspaceId, workspace.sshConfig) {
                 // shell 探测需要连接, 失败时不再读发行版, 以免再等一次超时
@@ -52,14 +102,14 @@ class WorkspaceReminderTransformer(
                 Log.w("WorkspaceReminder", "Workspace unreachable: $workspaceId", e)
                 return buildUnreachablePrompt(workspace, layout, e)
             }
-            buildSshWorkspacePrompt(workspace, layout, environment.shell, environment.distro, ctx.workspaceCwd)
+            buildSshWorkspacePrompt(workspace, layout, environment.shell, environment.distro, cwd)
         } else {
             buildWorkspacePrompt(
                 workspace = workspace,
                 shell = workspaceRepository.shell(workspaceId),
                 distro = readDistroName(workspaceId),
-                cwd = ctx.workspaceCwd,
-            ) + buildAgentsPrompt(workspaceId, ctx.workspaceCwd)
+                cwd = cwd,
+            ) + buildAgentsPrompt(workspaceId, cwd)
         }
     }
 
@@ -132,6 +182,20 @@ class WorkspaceReminderTransformer(
         const val MAX_OS_RELEASE_BYTES = 16L * 1024
         val OS_RELEASE_PATHS = listOf("/etc/os-release", "/usr/lib/os-release")
     }
+}
+
+/** 根据工作区的提示词模式决定返回默认生成、自定义文本或跳过注入（DISABLED）。 */
+internal suspend fun resolveWorkspacePrompt(
+    workspace: WorkspaceEntity,
+    defaultPrompt: suspend () -> String,
+    agentsPrompt: suspend () -> String,
+): String? = when (workspace.resolvePromptMode()) {
+    WorkspacePromptMode.DISABLED -> null
+    WorkspacePromptMode.CUSTOM -> {
+        val custom = workspace.customPrompt?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        custom + agentsPrompt()
+    }
+    WorkspacePromptMode.DEFAULT -> defaultPrompt()
 }
 
 /** 远程工作区提示词里描述的执行环境 */

@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.db.entity.WorkspacePromptMode
 import me.rerere.rikkahub.data.model.SshJumpHostDraft
 import me.rerere.rikkahub.data.model.SshJumpHostSettings
 import me.rerere.rikkahub.data.model.SshWorkspaceDraft
@@ -164,6 +165,11 @@ class WorkspaceRepository(
 
     suspend fun setShellCompatibilityMode(id: String, enabled: Boolean) {
         dao.setShellCompatibilityMode(id, enabled, System.currentTimeMillis())
+    }
+
+    suspend fun setPromptSettings(id: String, promptMode: WorkspacePromptMode, customPrompt: String?) {
+        val normalizedPrompt = customPrompt?.trim()?.takeIf { it.isNotEmpty() }
+        dao.updatePromptSettings(id, promptMode.name, normalizedPrompt, System.currentTimeMillis())
     }
 
     /**

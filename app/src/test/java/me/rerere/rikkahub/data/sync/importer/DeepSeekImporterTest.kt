@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.Assert.assertArrayEquals
@@ -216,6 +217,50 @@ class DeepSeekImporterTest {
             onConversation = { error("Must not save") },
         )
         assertEquals(DeepSeekImportResult(0, 0, 1, 0), result)
+    }
+
+    @Test
+    fun `imports attachments with hash characters and long context sessions cleanly`() = runBlocking {
+        val longMessages = buildList {
+            for (i in 1..600) {
+                val role = if (i % 2 == 1) "USER" else "ASSISTANT"
+                val parent = if (i == 1) null else i - 1
+                add(message(i, parent, role, "Turn #$i ${"context ".repeat(32)}"))
+            }
+            add(
+                """{"id":601,"parent_id":600,"role":"USER","fragments":[{"type":"FILE","files":[
+                    {"file_name":"doc#12345.txt","export_path":"chat_sessions/s_files/doc#12345.txt","is_image":false},
+                    {"file_name":"#abcde.png","export_path":"/chat_sessions/s_files/#abcde.png","is_image":true},
+                    {"file_name":"note.md#anchor","export_path":"chat_sessions/s_files/note.md","is_image":false}
+                ]}]}"""
+            )
+        }.joinToString()
+        val backup = archive(
+            session(longMessages, current = 601),
+            attachments = mapOf(
+                "chat_sessions/s_files/doc#12345.txt" to "txt".encodeToByteArray(),
+                "chat_sessions/s_files/#abcde.png" to byteArrayOf(1, 2, 3),
+                "chat_sessions/s_files/note.md" to "md".encodeToByteArray(),
+            ),
+        )
+        val saved = mutableListOf<DeepSeekAttachment>()
+        val conversations = mutableListOf<Conversation>()
+        val result = DeepSeekImporter.importStreaming(
+            backup,
+            Uuid.random(),
+            saveAttachment = {
+                saved += it
+                "file:///${it.fileName}"
+            },
+            onConversation = { conversations += it },
+        )
+        assertEquals(DeepSeekImportResult(1, 0, 0, 0), result)
+        assertEquals(601, conversations.single().messageNodes.size)
+        assertEquals(listOf("doc#12345.txt", "#abcde.png", "note.md#anchor"), saved.map { it.fileName })
+        assertEquals("text/plain", saved[0].mimeType)
+        assertEquals("image/png", saved[1].mimeType)
+        assertEquals("application/octet-stream", saved[2].mimeType)
+        assertEquals("text/plain", FileUtils.guessMimeTypeFromName("dir/test#12345.txt"))
     }
 
     /** Optional local verification; real chat data is never copied into test fixtures. */

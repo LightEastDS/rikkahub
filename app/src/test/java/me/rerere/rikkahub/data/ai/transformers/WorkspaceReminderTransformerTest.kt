@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.ai.transformers
 
 import kotlinx.coroutines.test.runTest
+import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.db.entity.WorkspacePromptMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -75,4 +77,80 @@ class WorkspaceReminderTransformerTest {
         val recovered = cache.get("w", "config") { RemoteEnvironment("/bin/sh", null) }
         assertEquals("/bin/sh", recovered.getOrThrow().shell)
     }
+
+    @Test
+    fun `disabled prompt mode skips default prompt and agents`() = runTest {
+        val workspace = workspaceEntity(promptMode = WorkspacePromptMode.DISABLED, customPrompt = "Custom")
+        var defaultCalls = 0
+        var agentsCalls = 0
+        val result = resolveWorkspacePrompt(
+            workspace = workspace,
+            defaultPrompt = {
+                defaultCalls++
+                "<workspace>default</workspace>"
+            },
+            agentsPrompt = {
+                agentsCalls++
+                "\n\n<workspace_instructions/>"
+            },
+        )
+        assertNull(result)
+        assertEquals(0, defaultCalls)
+        assertEquals(0, agentsCalls)
+    }
+
+    @Test
+    fun `custom prompt mode replaces default prompt and ignores blank custom text`() = runTest {
+        var defaultCalls = 0
+        val customWorkspace = workspaceEntity(
+            promptMode = WorkspacePromptMode.CUSTOM,
+            customPrompt = "  You are running on Debian 13 with zsh.  ",
+        )
+        val customResult = resolveWorkspacePrompt(
+            workspace = customWorkspace,
+            defaultPrompt = {
+                defaultCalls++
+                "<workspace>default</workspace>"
+            },
+            agentsPrompt = { "\n\n<workspace_instructions>AGENTS</workspace_instructions>" },
+        )
+        assertEquals(
+            "You are running on Debian 13 with zsh.\n\n<workspace_instructions>AGENTS</workspace_instructions>",
+            customResult,
+        )
+        assertEquals(0, defaultCalls)
+
+        val blankCustom = workspaceEntity(promptMode = WorkspacePromptMode.CUSTOM, customPrompt = "   ")
+        assertNull(
+            resolveWorkspacePrompt(
+                workspace = blankCustom,
+                defaultPrompt = { "<workspace>default</workspace>" },
+                agentsPrompt = { "\n\nAGENTS" },
+            )
+        )
+    }
+
+    @Test
+    fun `default prompt mode delegates to generated prompt`() = runTest {
+        val workspace = workspaceEntity(promptMode = WorkspacePromptMode.DEFAULT, customPrompt = "Ignored")
+        val result = resolveWorkspacePrompt(
+            workspace = workspace,
+            defaultPrompt = { "<workspace>generated</workspace>" },
+            agentsPrompt = { "" },
+        )
+        assertEquals("<workspace>generated</workspace>", result)
+    }
+
+    private fun workspaceEntity(
+        promptMode: WorkspacePromptMode,
+        customPrompt: String? = null,
+    ) = WorkspaceEntity(
+        id = "ws-1",
+        name = "Test",
+        root = "ws-1",
+        createdAt = 1L,
+        updatedAt = 1L,
+        promptMode = promptMode.name,
+        customPrompt = customPrompt,
+    )
 }

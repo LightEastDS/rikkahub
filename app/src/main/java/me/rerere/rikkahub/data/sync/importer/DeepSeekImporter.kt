@@ -4,12 +4,14 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromStream
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import me.rerere.ai.core.MessageRole
@@ -17,12 +19,13 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.JsonInstant
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.net.URLConnection
+import java.io.InputStream
 import java.time.Instant
 import java.util.UUID
 import java.util.zip.ZipEntry
@@ -107,12 +110,14 @@ object DeepSeekImporter {
                                 val attachment = fileElement as? JsonObject ?: return@forEach
                                 val path = attachment["export_path"].text
                                 val name = attachment["file_name"].text ?: "attachment"
-                                val mime = URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
+                                val mime = FileUtils.guessMimeTypeFromName(name)
                                 val url = if (path.isNullOrBlank()) {
                                     null
                                 } else {
                                     if (!savedFiles.containsKey(path)) {
-                                        val binary = zip.getEntry(path)?.takeUnless { it.isDirectory }
+                                        val binary = (zip.getEntry(path)
+                                            ?: path.removePrefix("/").takeIf { it != path }?.let(zip::getEntry))
+                                            ?.takeUnless { it.isDirectory }
                                         savedFiles[path] = binary?.let {
                                             saveAttachment(DeepSeekAttachment(name, mime, zip.readBytes(it)))
                                         }
@@ -223,10 +228,16 @@ object DeepSeekImporter {
         return path.asReversed()
     }
 
+    @OptIn(ExperimentalSerializationApi::class)
     private fun ZipFile.readObject(path: String): JsonObject {
         val entry = getEntry(path) ?: error("Invalid DeepSeek export: $path not found")
-        return JsonInstant.parseToJsonElement(readBytes(entry).decodeToString()) as? JsonObject
-            ?: error("Invalid DeepSeek export: $path is not an object")
+        require(entry.size <= MAX_ENTRY_SIZE) { "DeepSeek archive entry is too large: ${entry.name}" }
+        // 流式解析 JSON，避免长上下文会话先整体拷贝为大 ByteArray 和 String 再反序列化造成峰值内存翻倍
+        return getInputStream(entry).use { raw ->
+            val bounded = BoundedEntryInputStream(raw, MAX_ENTRY_SIZE.toLong(), entry.name)
+            JsonInstant.decodeFromStream<JsonElement>(bounded) as? JsonObject
+                ?: error("Invalid DeepSeek export: $path is not an object")
+        }
     }
 
     private fun ZipFile.readBytes(entry: ZipEntry): ByteArray {
@@ -244,6 +255,34 @@ object DeepSeekImporter {
             }
             output.toByteArray()
         }
+    }
+
+    private class BoundedEntryInputStream(
+        private val delegate: InputStream,
+        private val maxBytes: Long,
+        private val entryName: String,
+    ) : InputStream() {
+        private var totalRead = 0L
+
+        override fun read(): Int {
+            val value = delegate.read()
+            if (value >= 0) {
+                totalRead++
+                require(totalRead <= maxBytes) { "DeepSeek archive entry is too large: $entryName" }
+            }
+            return value
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val count = delegate.read(b, off, len)
+            if (count > 0) {
+                totalRead += count
+                require(totalRead <= maxBytes) { "DeepSeek archive entry is too large: $entryName" }
+            }
+            return count
+        }
+
+        override fun close() = delegate.close()
     }
 
     private val JsonElement?.text: String?

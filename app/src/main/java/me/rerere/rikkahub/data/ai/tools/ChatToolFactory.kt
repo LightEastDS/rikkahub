@@ -33,6 +33,10 @@ internal fun shouldUseExternalWebSearch(assistant: Assistant, model: Model): Boo
     return assistant.enableWebSearch && BuiltInTools.Search !in model.tools
 }
 
+internal fun shouldProvideFallbackSearchTools(assistant: Assistant, model: Model): Boolean {
+    return BuiltInTools.Search in model.tools && !shouldUseExternalWebSearch(assistant, model)
+}
+
 class InvalidMcpServerNamesException(val names: List<String>) :
     IllegalStateException("Invalid MCP server names: ${names.joinToString(", ")}")
 
@@ -103,9 +107,34 @@ class ChatToolFactory(
         }
         // 过长的输出存成文件让模型用 shell 按需读取；没有 shell 时模型读不到文件，只能原样返回。
         // 文件放在本机, 只有本地 Rootfs 挂载了 /tool_outputs, 远程工作区同样读不到
-        val canReadToolOutputs = workspaceTools.isNotEmpty() &&
-            assistant.workspaceId?.let { workspaceRepository.getById(it.toString()) }?.capabilities()?.rootfs == true
-        return if (canReadToolOutputs) tools.map(::withOutputTruncation) else tools
+        return if (workspaceTools.isNotEmpty() && isLocalRootfsReady(assistant.workspaceId)) {
+            tools.map(::withOutputTruncation)
+        } else {
+            tools
+        }
+    }
+
+    /**
+     * 当开启模型内置搜索（[BuiltInTools.Search]）时提供不声明给模型的本地搜索兜底执行器：
+     * 切换搜索模式后历史里仍保留 `search_web` 调用、或兼容层未处理服务端 `web_search` 时可直接完成搜索，避免报错 `Tool search_web not found`。
+     */
+    suspend fun createFallbackTools(
+        settings: Settings,
+        assistant: Assistant,
+        model: Model,
+    ): List<Tool> {
+        if (!shouldProvideFallbackSearchTools(assistant, model)) return emptyList()
+        val searchTools = createSearchTools(settings).toList()
+        return if (isLocalRootfsReady(assistant.workspaceId)) {
+            searchTools.map(::withOutputTruncation)
+        } else {
+            searchTools
+        }
+    }
+
+    private suspend fun isLocalRootfsReady(workspaceId: Uuid?): Boolean {
+        val workspace = workspaceId?.let { workspaceRepository.getById(it.toString()) } ?: return false
+        return workspace.shellStatus == WorkspaceShellStatus.READY.name && workspace.capabilities().rootfs
     }
 
     private fun withOutputTruncation(tool: Tool): Tool {

@@ -209,7 +209,10 @@ internal class AgentLoop(
         }
 
     private suspend fun runTool(tool: UIMessagePart.Tool): List<UIMessagePart> = try {
-        val definition = findTool(tool.toolName) ?: error("Tool ${tool.toolName} not found")
+        val definition = findTool(tool.toolName) ?: return errorOutput(
+            "Tool ${tool.toolName} not found: it is disabled or unavailable in the current configuration. " +
+                "Use only currently available tools or answer directly."
+        )
         val args = runCatching { json.parseToJsonElement(tool.input.ifBlank { "{}" }) }
             .getOrElse { error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}") }
         definition.execute(args).ifEmpty { listOf(UIMessagePart.Text(EMPTY_TOOL_OUTPUT)) }
@@ -220,7 +223,8 @@ internal class AgentLoop(
         errorOutput("[${e.javaClass.name}] ${e.message}\n${e.stackTraceToString()}")
     }
 
-    private fun findTool(name: String) = request.tools.find { it.name == name }
+    private fun findTool(name: String) =
+        request.tools.find { it.name == name } ?: request.fallbackTools.find { it.name == name }
 
     private suspend fun update(updated: UIMessage) {
         message = updated

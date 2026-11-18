@@ -357,10 +357,14 @@
 * **v3.3.0.1**：
   1. **同步官方上游 `v3.3.0` 更新**：
      - 合并官方上游 `v3.3.0`（`41d77f1e`）全部新特性与修复（包括快速入门引导页与未配置模型提示卡片、DeepSeek 聊天记录 ZIP 分支导入及 DeepSeek TTS/ASR、本地工作区挂载共享存储目录、`splitAssistantBubbleByParagraph` 助手回复按段落拆分气泡、消息概览标记上下文压缩检查点、安全模式清除超大设置数据、Vertex AI 服务账号 Interactions API 支持、自动压缩上下文默认开启、仅调试构建打印请求体日志、Phone Use 悬浮窗亮屏与截图位图及时回收、修复测试连接弹窗输入搜索自动关闭及后台任务长命令滚动等）；
-     - **数据库迁移平滑衔接**：将上游 DB 32→34 变更（`message_node (conversation_id, node_index)` 复合索引与 `workspaces.storage_mounts` 列）整合为 Fork 专属迁移 `Migration_37_38`（数据库版本升至 38），完整保留 Fork DB 33→37 的 ST 预设与 `/compact` 压缩检查点表结构与数据；
+     - **数据库迁移平滑衔接**：将上游 DB 32→34 变更（`message_node (conversation_id, node_index)` 复合索引与 `workspaces.storage_mounts` 列）整合为 Fork 专属迁移 `Migration_37_38`，再通过 `Migration_38_39` 新增 `workspaces.prompt_mode` 与 `workspaces.custom_prompt` 字段（数据库版本升至 39），完整保留 Fork DB 33→37 的 ST 预设与 `/compact` 压缩检查点表结构与数据；
      - **特性融合与纯净化延续**：在 `ChatMessage` 段落拆分气泡渲染中保留 ST 显示层正则管道与 Markdown 渲染开关（`MessageMarkdownBlock`）；在 `GoogleProvider` / `GoogleStreamDecoder` 中整合独立 `thoughtSignature` 附着/回传、未知 part 跳过及流中错误/断流保护；在 `DefaultProviders` 中保留 `DEEPSEEK_PROVIDER_ID` 并继续彻底移除所有内置赞助商中转配置；
      - 保留全部本地定制增强与独立发布签名配置。
-  2. **版本号升级**：升至 `3.3.0.1`（versionCode: 212）。
+  2. **修复并增强上游已知问题（#2346 / #2348 / #2341）**：
+     - **修复 DeepSeek 聊天记录长上下文及含 `#` 附件导入失败**（`#2346`）：新增 `FileUtils.guessMimeTypeFromName` 安全提取扩展名后再解析 MIME 类型，避免 Android `DefaultFileNameMap` 处理含 `#` 文件名时抛出 `StringIndexOutOfBoundsException: String index out of range: -7`（同步替换 `RemoteFileStore` 复用）；`DeepSeekImporter.readObject` 改为受限流式 JSON 解析（`JsonInstant.decodeFromStream` + `BoundedEntryInputStream`），降低长上下文大 JSON 导入时的峰值内存占用并兼容带 `/` 前缀的附件路径。
+     - **支持工作区提示词自定义与关闭**（`#2348`）：在 `WorkspaceEntity` / `WorkspaceDAO` / `WorkspaceRepository` 新增 `prompt_mode`（`DEFAULT` / `CUSTOM` / `DISABLED`）与 `custom_prompt` 持久化字段及 `Migration_38_39` 迁移；在 `WorkspaceReminderTransformer` 中支持关闭注入或使用自定义提示词（并保留本地 `AGENTS.md` 指令），在工作区详情页新增「工作区提示词」设置卡片与支持「填入默认模板」的编辑弹窗。
+     - **修复开启模型内置搜索后仍调用 `search_web` 报错 `Tool search_web not found`**（`#2341`）：在 `AgentRequest` 与 `AgentLoop` 中新增隐藏运行时兜底工具集合 `fallbackTools`（不向模型请求声明工具，仅在模型因历史上下文或未处理内置 `web_search` 的兼容层仍发出 `search_web` / `scrape_web` 调用时兜底执行），并在 `ChatToolFactory` / `ChatRequestFactory` 中于内置搜索开启时自动注入本地搜索兜底器；同时优化工具缺失时的报错文本，避免直接暴露原始异常堆栈。
+  3. **版本号升级**：升至 `3.3.0.1`（versionCode: 212）。
 
 
 

@@ -62,8 +62,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -110,6 +112,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.WorkspaceFileWriteToolNames
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.db.entity.WorkspacePromptMode
 import me.rerere.rikkahub.data.model.WorkspaceStorageMount
 import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
@@ -257,6 +260,8 @@ fun WorkspaceDetailPage(id: String) {
                         onInstallRootfs = { showInstallDialog = true },
                         onToolApprovalChange = vm::setToolApproval,
                         onShellCompatibilityModeChange = vm::setShellCompatibilityMode,
+                        onPromptSettingsChange = vm::setPromptSettings,
+                        onLoadDefaultPromptTemplate = vm::loadDefaultPromptTemplate,
                         onStorageMountsChange = vm::setStorageMounts,
                         onEditSsh = { navController.navigate(Screen.WorkspaceSshEditor(id)) },
                     )
@@ -417,6 +422,8 @@ private fun WorkspaceBasicPage(
     onInstallRootfs: () -> Unit,
     onToolApprovalChange: (String, Boolean) -> Unit,
     onShellCompatibilityModeChange: (Boolean) -> Unit,
+    onPromptSettingsChange: (WorkspacePromptMode, String?) -> Unit,
+    onLoadDefaultPromptTemplate: suspend () -> String?,
     onStorageMountsChange: (List<WorkspaceStorageMount>) -> Unit,
     onEditSsh: () -> Unit,
 ) {
@@ -508,12 +515,161 @@ private fun WorkspaceBasicPage(
         }
 
         item {
+            WorkspaceSystemPromptCard(
+                workspace = workspace,
+                onPromptSettingsChange = onPromptSettingsChange,
+                onLoadDefaultTemplate = onLoadDefaultPromptTemplate,
+            )
+        }
+
+        item {
             WorkspaceToolApprovalCard(
                 workspace = workspace,
                 onToolApprovalChange = onToolApprovalChange,
             )
         }
     }
+}
+
+@Composable
+private fun WorkspaceSystemPromptCard(
+    workspace: WorkspaceEntity?,
+    onPromptSettingsChange: (WorkspacePromptMode, String?) -> Unit,
+    onLoadDefaultTemplate: suspend () -> String?,
+) {
+    val mode = workspace?.resolvePromptMode() ?: WorkspacePromptMode.DEFAULT
+    var showCustomDialog by rememberSaveable { mutableStateOf(false) }
+
+    CardGroup(
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.workspace_detail_prompt_title))
+                Text(
+                    text = stringResource(R.string.workspace_detail_prompt_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    ) {
+        formItem {
+            ConnectedChoiceButtons(
+                options = WorkspacePromptMode.entries,
+                selected = mode,
+                onSelect = { selected ->
+                    if (workspace == null) return@ConnectedChoiceButtons
+                    onPromptSettingsChange(selected, workspace.customPrompt)
+                    if (selected == WorkspacePromptMode.CUSTOM && workspace.customPrompt.isNullOrBlank()) {
+                        showCustomDialog = true
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { option, selected ->
+                ConnectedChoiceLabel(
+                    text = stringResource(
+                        when (option) {
+                            WorkspacePromptMode.DEFAULT -> R.string.workspace_detail_prompt_mode_default
+                            WorkspacePromptMode.CUSTOM -> R.string.workspace_detail_prompt_mode_custom
+                            WorkspacePromptMode.DISABLED -> R.string.workspace_detail_prompt_mode_disabled
+                        }
+                    ),
+                    selected = selected,
+                )
+            }
+        }
+        if (mode == WorkspacePromptMode.CUSTOM) {
+            item(
+                onClick = if (workspace != null) {
+                    { showCustomDialog = true }
+                } else {
+                    null
+                },
+                leadingContent = { CardGroupIcon(HugeIcons.PencilEdit01) },
+                headlineContent = { Text(stringResource(R.string.workspace_detail_prompt_edit)) },
+                supportingContent = {
+                    Text(
+                        text = workspace?.customPrompt?.takeIf { it.isNotBlank() }
+                            ?: stringResource(R.string.workspace_detail_prompt_custom_empty),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+            )
+        }
+    }
+
+    if (showCustomDialog && workspace != null) {
+        WorkspaceCustomPromptDialog(
+            initialPrompt = workspace.customPrompt.orEmpty(),
+            onLoadDefaultTemplate = onLoadDefaultTemplate,
+            onDismiss = { showCustomDialog = false },
+            onSave = { prompt ->
+                onPromptSettingsChange(WorkspacePromptMode.CUSTOM, prompt)
+                showCustomDialog = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun WorkspaceCustomPromptDialog(
+    initialPrompt: String,
+    onLoadDefaultTemplate: suspend () -> String?,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var draft by remember(initialPrompt) { mutableStateOf(initialPrompt) }
+    var loadingTemplate by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.workspace_detail_prompt_edit)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.workspace_detail_prompt_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 5,
+                    maxLines = 12,
+                )
+                TextButton(
+                    enabled = !loadingTemplate,
+                    onClick = {
+                        scope.launch {
+                            loadingTemplate = true
+                            try {
+                                onLoadDefaultTemplate()?.let { draft = it }
+                            } finally {
+                                loadingTemplate = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.workspace_detail_prompt_fill_default))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(draft) }) {
+                Text(stringResource(R.string.common_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.common_cancel))
+            }
+        },
+    )
 }
 
 @Composable

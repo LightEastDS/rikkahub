@@ -1934,4 +1934,13 @@
   <string name="quick_start_page_deepseek_import_desc">Выберите ZIP-файл из предыдущего шага. Для каждого чата в текущего ассистента \"%1$s\" импортируется отображаемая сейчас ветка, включая рассуждения и вложения. Уже импортированные чаты пропускаются, поэтому повторный импорт безопасен.</string>
   <string name="quick_start_page_deepseek_importing">Импорт…</string>
   <string name="quick_start_page_deepseek_import_another">Импортировать другой ZIP</string>
+  <string name="workspace_detail_prompt_title">Промпт рабочего пространства</string>
+  <string name="workspace_detail_prompt_desc">Управляет системным промптом окружения, добавляемым в диалоги для этого рабочего пространства</string>
+  <string name="workspace_detail_prompt_mode_default">По умолчанию</string>
+  <string name="workspace_detail_prompt_mode_custom">Свой</string>
+  <string name="workspace_detail_prompt_mode_disabled">Откл.</string>
+  <string name="workspace_detail_prompt_edit">Свой промпт</string>
+  <string name="workspace_detail_prompt_custom_empty">Не задано. Нажмите, чтобы ввести свой промпт (если пусто, ничего не добавляется)</string>
+  <string name="workspace_detail_prompt_fill_default">Заполнить шаблоном по умолчанию</string>
+  <string name="workspace_detail_prompt_hint">Напишите собственное описание окружения рабочего пространства, чтобы заменить автоматически определяемый дистрибутив, версию, оболочку и пути.</string>
 </resources>

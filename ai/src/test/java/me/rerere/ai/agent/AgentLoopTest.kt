@@ -40,6 +40,7 @@ class AgentLoopTest {
     private fun request(
         messages: List<UIMessage> = listOf(UIMessage.user("hi")),
         tools: List<Tool> = emptyList(),
+        fallbackTools: List<Tool> = emptyList(),
         stream: Boolean = true,
         maxSteps: Int = 256,
         retry: RetryPolicy = RetryPolicy.NONE,
@@ -48,6 +49,7 @@ class AgentLoopTest {
         providerSetting = ProviderSetting.OpenAI(),
         messages = messages,
         tools = tools,
+        fallbackTools = fallbackTools,
         stream = stream,
         maxSteps = maxSteps,
         retry = retry,
@@ -301,8 +303,33 @@ class AgentLoopTest {
         val message = runToEnd(request(tools = tools)).finished().message
 
         assertTrue(message.tool("call-1").outputText().contains("Invalid tool arguments JSON for search"))
-        assertTrue(message.tool("call-2").outputText().contains("Tool missing not found"))
+        val missingOutput = message.tool("call-2").outputText()
+        assertTrue(missingOutput.contains("Tool missing not found"))
+        assertFalse(missingOutput.contains("IllegalStateException"))
         assertFalse(executed)
+    }
+
+    @Test
+    fun `fallback tools execute without being declared to provider`() = runTest {
+        var executedQuery: String? = null
+        val fallback = tool("search_web") { input ->
+            executedQuery = input.jsonObject["query"]?.jsonPrimitive?.content
+            listOf(UIMessagePart.Text("result"))
+        }
+        provider.stream {
+            toolCall("call-1", "search_web", """{"query":"news"}""")
+            finish()
+        }
+        provider.stream {
+            text("done")
+            finish()
+        }
+
+        val message = runToEnd(request(fallbackTools = listOf(fallback))).finished().message
+
+        assertTrue(provider.requests.all { it.params.tools.isEmpty() })
+        assertEquals("news", executedQuery)
+        assertEquals("result", message.tool("call-1").outputText())
     }
 
     @Test

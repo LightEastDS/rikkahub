@@ -16,6 +16,12 @@ import me.rerere.workspace.WorkspaceType
 import me.rerere.workspace.ssh.SshWorkspaceBackend
 import java.io.File
 
+enum class WorkspacePromptMode {
+    DEFAULT,
+    CUSTOM,
+    DISABLED,
+}
+
 @Entity(
     tableName = "workspaces",
     indices = [
@@ -51,6 +57,11 @@ data class WorkspaceEntity(
     // 挂载进 Rootfs 的共享存储目录 (WorkspaceStorageMount 列表的 JSON), 只对本地工作区生效
     @ColumnInfo("storage_mounts", defaultValue = "[]")
     val storageMounts: String = "[]",
+    // 工作区系统提示词注入方式：DEFAULT（自动生成）、CUSTOM（自定义文本）、DISABLED（不注入）
+    @ColumnInfo("prompt_mode", defaultValue = "DEFAULT")
+    val promptMode: String = WorkspacePromptMode.DEFAULT.name,
+    @ColumnInfo("custom_prompt")
+    val customPrompt: String? = null,
 ) {
     fun isSsh(): Boolean = type == WorkspaceType.SSH.name
 
@@ -89,6 +100,9 @@ data class WorkspaceEntity(
     fun toolApprovalOverrides(): Map<String, Boolean> = runCatching {
         JsonInstant.decodeFromString<Map<String, Boolean>>(toolApprovals)
     }.getOrDefault(emptyMap())
+
+    fun resolvePromptMode(): WorkspacePromptMode =
+        runCatching { WorkspacePromptMode.valueOf(promptMode) }.getOrDefault(WorkspacePromptMode.DEFAULT)
 
     fun toWorkspace(): Workspace = Workspace(
         id = id,

@@ -10,11 +10,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.sync.s3.S3Client
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.data.sync.s3.S3ListResult
 import java.io.File
-import java.net.URLConnection
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZonedDateTime
@@ -215,8 +215,7 @@ private class S3ObjectStorage(private val client: S3Client) : RemoteObjectStorag
 private fun S3Config.isUsable(): Boolean =
     endpoint.isNotBlank() && accessKeyId.isNotBlank() && secretAccessKey.isNotBlank() && bucket.isNotBlank()
 
-private fun guessContentType(file: File): String =
-    URLConnection.guessContentTypeFromName(file.name) ?: "application/octet-stream"
+private fun guessContentType(file: File): String = FileUtils.guessMimeTypeFromName(file.name)
 
 private fun File.sha256Hex(): String {
     val digest = MessageDigest.getInstance("SHA-256")

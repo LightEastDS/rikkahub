@@ -10,18 +10,16 @@ import android.webkit.MimeTypeMap
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.net.URLConnection
 import kotlin.uuid.Uuid
 
 object FileUtils {
     private const val TAG = "FileUtils"
 
     fun buildUuidFileName(displayName: String?, mimeType: String?): String {
-        val extFromName = displayName
-            ?.substringAfterLast('.', "")
-            ?.takeIf { it.isNotBlank() && it != displayName }
-            ?.lowercase()
+        val extFromName = extractSafeExtension(displayName)
         val extFromMime = mimeType
-            ?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it.lowercase()) }
+            ?.let { runCatching { MimeTypeMap.getSingleton()?.getExtensionFromMimeType(it.lowercase()) }.getOrNull() }
             ?.takeIf { it.isNotBlank() }
             ?.lowercase()
         val ext = extFromName ?: extFromMime ?: "bin"
@@ -81,12 +79,32 @@ object FileUtils {
     }
 
     fun guessMimeType(file: File, fileName: String): String {
-        val ext = fileName.substringAfterLast('.', "").lowercase()
-        if (ext.isNotEmpty()) {
-            return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
-                ?: "application/octet-stream"
+        val ext = extractSafeExtension(fileName)
+        if (ext != null) {
+            return guessMimeTypeFromExtension(ext)
         }
         return sniffMimeType(file)
+    }
+
+    /** 根据文件名安全推断 MIME 类型，绕开 Android `DefaultFileNameMap` 处理 `#` 时越界的系统缺陷。 */
+    fun guessMimeTypeFromName(fileName: String): String {
+        val ext = extractSafeExtension(fileName) ?: return "application/octet-stream"
+        return guessMimeTypeFromExtension(ext)
+    }
+
+    private fun guessMimeTypeFromExtension(ext: String): String {
+        return runCatching { MimeTypeMap.getSingleton()?.getMimeTypeFromExtension(ext) }.getOrNull()
+            ?: runCatching { URLConnection.guessContentTypeFromName("file.$ext") }.getOrNull()
+            ?: "application/octet-stream"
+    }
+
+    private fun extractSafeExtension(fileName: String?): String? {
+        if (fileName.isNullOrBlank()) return null
+        val baseName = fileName.substringAfterLast('/').substringAfterLast('\\')
+        if ('.' !in baseName) return null
+        return baseName.substringAfterLast('.', "")
+            .lowercase()
+            .takeIf { ext -> ext.isNotEmpty() && ext.all { ch -> ch.isLetterOrDigit() || ch in "_+-" } }
     }
 
     fun compressBitmapToPng(bitmap: Bitmap): ByteArray = ByteArrayOutputStream().use {

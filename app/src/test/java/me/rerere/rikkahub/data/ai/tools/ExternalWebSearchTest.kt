@@ -46,5 +46,24 @@ class ExternalWebSearchTest {
         val model = Model(tools = setOf(BuiltInTools.UrlContext))
 
         assertTrue(shouldUseExternalWebSearch(assistant, model))
+        assertFalse(shouldProvideFallbackSearchTools(assistant, model))
+    }
+
+    @Test
+    fun `built-in search provides hidden fallback search tools`() {
+        val assistant = Assistant(enableWebSearch = false)
+        val model = Model(tools = setOf(BuiltInTools.Search))
+
+        assertFalse(shouldUseExternalWebSearch(assistant, model))
+        assertTrue(shouldProvideFallbackSearchTools(assistant, model))
+    }
+
+    @Test
+    fun `search off provides neither external nor fallback search tools`() {
+        val assistant = Assistant(enableWebSearch = false)
+        val model = Model()
+
+        assertFalse(shouldUseExternalWebSearch(assistant, model))
+        assertFalse(shouldProvideFallbackSearchTools(assistant, model))
     }
 }

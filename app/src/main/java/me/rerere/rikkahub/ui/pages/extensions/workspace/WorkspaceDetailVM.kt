@@ -16,7 +16,9 @@ import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.db.entity.WorkspacePromptMode
 import me.rerere.rikkahub.data.model.WorkspaceStorageMount
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.BackgroundShellManager
@@ -287,6 +289,23 @@ class WorkspaceDetailVM(
             }
         }
     }
+
+    fun setPromptSettings(promptMode: WorkspacePromptMode, customPrompt: String?) {
+        viewModelScope.launch {
+            try {
+                repository.setPromptSettings(id, promptMode, customPrompt)
+                val workspace = repository.getById(id)
+                _state.update { it.copy(workspace = workspace) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _settingsError.value = error.message.orEmpty()
+            }
+        }
+    }
+
+    suspend fun loadDefaultPromptTemplate(): String? =
+        WorkspaceReminderTransformer(repository).buildDefaultPromptTemplate(id)
 
     fun setStorageMounts(mounts: List<WorkspaceStorageMount>) {
         viewModelScope.launch {
