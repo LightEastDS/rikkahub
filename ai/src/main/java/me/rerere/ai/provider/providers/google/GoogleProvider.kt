@@ -61,6 +61,7 @@ import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
+import me.rerere.ai.util.logRequestBody
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.parseErrorDetail
@@ -91,15 +92,16 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private val serviceAccountTokenProvider by lazy {
         ServiceAccountTokenProvider(client)
     }
-    private val interactionsAPI = InteractionsAPI(client = client, keyRoulette = keyRoulette)
+    private val interactionsAPI = InteractionsAPI(client = client, authorize = ::transformRequest)
 
     override suspend fun getQuota(providerSetting: ProviderSetting.Google): ProviderQuota? =
         client.runQuotaQuery(providerSetting) {
             keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
         }
 
-    // Interactions API 目前只有 Gemini Developer API 提供，Vertex AI 仍走 generateContent
-    private fun ProviderSetting.Google.usesInteractionsApi() = useInteractionsApi && !vertexAI
+    // Vertex AI 只有服务账号走 Interactions，且区域须为 global/us/eu，否则仍走 generateContent
+    private fun ProviderSetting.Google.usesInteractionsApi() = useInteractionsApi &&
+        (!vertexAI || (useServiceAccount && location in VERTEX_INTERACTIONS_LOCATIONS))
 
     private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
         return if (!providerSetting.vertexAI) {
@@ -287,7 +289,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
 
         val responseId = Uuid.random().toString()
         val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
@@ -581,16 +583,30 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             // Standalone thoughtSignature-only part: attach signature to previous part when possible
             if (!rawPart.hasKnownContentKey() && rawPart.containsKey("thoughtSignature")) {
                 val signatureMetadata = rawPart.toGoogleThoughtMetadata()
-                if (signatureMetadata != null && isNotEmpty()) {
-                    val lastIndex = lastIndex
-                    val updated = get(lastIndex).withMergedGoogleMetadata(signatureMetadata)
+                val last = lastOrNull()
+                if (signatureMetadata != null && last != null && !last.hasThoughtSignature()) {
+                    val updated = last.withMergedGoogleMetadata(signatureMetadata)
                     if (updated != null) {
                         set(lastIndex, updated)
                         return@forEachIndexed
                     }
                 }
             }
-            val part = parseMessagePart(rawPart, index)
+            val part = parseMessagePart(rawPart, index) ?: return@forEachIndexed
+            val partMetadata = (part as? UIMessagePart.Text)?.takeIf { it.text.isEmpty() }?.metadata
+            if (partMetadata != null) {
+                // 不带文本的签名 part：挂到前一个还没有签名的 part 上，否则单独保留
+                val previous = lastOrNull()
+                val updated = if (previous != null && !previous.hasThoughtSignature()) {
+                    previous.withMergedGoogleMetadata(partMetadata)
+                } else null
+                if (updated != null) {
+                    set(lastIndex, updated)
+                } else {
+                    add(part)
+                }
+                return@forEachIndexed
+            }
             if (part !is UIMessagePart.ServerTool) {
                 add(part)
                 return@forEachIndexed
@@ -616,7 +632,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun parseMessagePart(jsonObject: JsonObject, index: Int): UIMessagePart {
+    private fun parseMessagePart(jsonObject: JsonObject, index: Int): UIMessagePart? {
         return when {
             jsonObject.containsKey("text") -> {
                 val thought = jsonObject["thought"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -704,6 +720,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 )
             }
 
+            // Gemini 可能单独下发只含 thoughtSignature 的 part
             jsonObject.containsKey("thoughtSignature") -> {
                 val thought = jsonObject["thought"]?.jsonPrimitive?.booleanOrNull ?: false
                 val metadata = jsonObject.toGoogleThoughtMetadata()
@@ -722,7 +739,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 }
             }
 
-            else -> error("unknown message part type: $jsonObject")
+            // 未知 part 直接跳过，避免整次请求失败
+            else -> null
         }
     }
 
@@ -970,6 +988,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             containsKey("toolCall") ||
             containsKey("toolResponse") ||
             containsKey("inlineData")
+
+    private fun UIMessagePart.hasThoughtSignature(): Boolean =
+        metadataAs<GoogleThoughtMetadata>()?.thoughtSignature != null
 
     private fun UIMessagePart.withMergedGoogleMetadata(extra: JsonObject): UIMessagePart? = when (this) {
         is UIMessagePart.Text -> copy(metadata = mergeGoogleMetadata(metadata, extra))

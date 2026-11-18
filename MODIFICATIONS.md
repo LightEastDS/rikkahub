@@ -354,6 +354,14 @@
      - **修复 OpenAI Responses API 内置生图显示与持久化**（#2311）：支持流式与非流式 `image_generation_call` 局部/终态图像解析，完善 Base64 图像转存本地文件（`FilesManager.persistGeneratedImage`）、流式空占位清理及 `withGenerationCleanup` 异常隔离逻辑。
      - **修复 GitHub 构建版启动弹出启用 Google Play 服务提示**（#2313）：通过 `AppAnalytics` 按 flavor 隔离 Firebase Analytics / Crashlytics 初始化与上报（`github` flavor 为空实现且不引入 GMS / Firebase 依赖，`play` flavor 保持原有实现）。
   2. **版本号升级**：升至 `3.2.0.2`（versionCode: 211）。
+* **v3.3.0.1**：
+  1. **同步官方上游 `v3.3.0` 更新**：
+     - 合并官方上游 `v3.3.0`（`41d77f1e`）全部新特性与修复（包括快速入门引导页与未配置模型提示卡片、DeepSeek 聊天记录 ZIP 分支导入及 DeepSeek TTS/ASR、本地工作区挂载共享存储目录、`splitAssistantBubbleByParagraph` 助手回复按段落拆分气泡、消息概览标记上下文压缩检查点、安全模式清除超大设置数据、Vertex AI 服务账号 Interactions API 支持、自动压缩上下文默认开启、仅调试构建打印请求体日志、Phone Use 悬浮窗亮屏与截图位图及时回收、修复测试连接弹窗输入搜索自动关闭及后台任务长命令滚动等）；
+     - **数据库迁移平滑衔接**：将上游 DB 32→34 变更（`message_node (conversation_id, node_index)` 复合索引与 `workspaces.storage_mounts` 列）整合为 Fork 专属迁移 `Migration_37_38`（数据库版本升至 38），完整保留 Fork DB 33→37 的 ST 预设与 `/compact` 压缩检查点表结构与数据；
+     - **特性融合与纯净化延续**：在 `ChatMessage` 段落拆分气泡渲染中保留 ST 显示层正则管道与 Markdown 渲染开关（`MessageMarkdownBlock`）；在 `GoogleProvider` / `GoogleStreamDecoder` 中整合独立 `thoughtSignature` 附着/回传、未知 part 跳过及流中错误/断流保护；在 `DefaultProviders` 中保留 `DEEPSEEK_PROVIDER_ID` 并继续彻底移除所有内置赞助商中转配置；
+     - 保留全部本地定制增强与独立发布签名配置。
+  2. **版本号升级**：升至 `3.3.0.1`（versionCode: 212）。
+
 
 
 

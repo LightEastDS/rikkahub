@@ -490,16 +490,31 @@ private fun MessagePartsBlock(
                                 }
                             } else {
                                 if (settings.displaySetting.showAssistantBubble) {
-                                    ChatMessageBubble(
-                                        role = role,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
-                                        modifier = Modifier.animateContentSize(),
-                                    ) {
-                                        MessageMarkdownBlock(
-                                            content = displayContent,
-                                            streaming = streamingText,
-                                            onClickCitation = handleClickCitation,
-                                        )
+                                    val splitByParagraph = settings.displaySetting.splitAssistantBubbleByParagraph
+                                    // 拆成多个气泡只影响显示，消息本身还是一条
+                                    val paragraphs = remember(displayContent, splitByParagraph) {
+                                        if (splitByParagraph) {
+                                            splitMarkdownParagraphs(displayContent).ifEmpty { listOf(displayContent) }
+                                        } else {
+                                            listOf(displayContent)
+                                        }
+                                    }
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        paragraphs.fastForEachIndexed { index, paragraph ->
+                                            key(index) {
+                                                ChatMessageBubble(
+                                                    role = role,
+                                                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
+                                                    modifier = Modifier.animateContentSize(),
+                                                ) {
+                                                    MessageMarkdownBlock(
+                                                        content = paragraph,
+                                                        streaming = streamingText && index == paragraphs.lastIndex,
+                                                        onClickCitation = handleClickCitation,
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 } else {
                                     MessageMarkdownBlock(
