@@ -1943,4 +1943,7 @@
   <string name="workspace_detail_prompt_custom_empty">Не задано. Нажмите, чтобы ввести свой промпт (если пусто, ничего не добавляется)</string>
   <string name="workspace_detail_prompt_fill_default">Заполнить шаблоном по умолчанию</string>
   <string name="workspace_detail_prompt_hint">Напишите собственное описание окружения рабочего пространства, чтобы заменить автоматически определяемый дистрибутив, версию, оболочку и пути.</string>
+  <string name="setting_page_preferences_notification_battery_optimization">Игнорировать оптимизацию батареи</string>
+  <string name="setting_page_preferences_notification_battery_optimization_on">Разрешено. Система реже останавливает фоновую генерацию</string>
+  <string name="setting_page_preferences_notification_battery_optimization_off">Не разрешено. Система может останавливать генерацию в фоне для экономии заряда батареи</string>
 </resources>

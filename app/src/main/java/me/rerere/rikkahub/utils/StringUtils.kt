@@ -1,10 +1,20 @@
 package me.rerere.rikkahub.utils
 
+import me.rerere.rikkahub.data.files.FileUtils
 import org.apache.commons.text.StringEscapeUtils
 import java.net.URLDecoder
 import java.net.URLEncoder
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+
+/**
+ * Guesses a MIME type from a file name's extension.
+ *
+ * Delegates to [FileUtils.guessMimeTypeFromName] to avoid Android 9/10's DefaultFileNameMap
+ * StringIndexOutOfBoundsException on '#' and reject anchor suffixes.
+ */
+fun guessMimeTypeFromFileName(fileName: String): String =
+    FileUtils.guessMimeTypeFromName(fileName)
 
 fun String.urlEncode(): String {
     return URLEncoder.encode(this, "UTF-8")
@@ -108,12 +118,12 @@ fun String.extractQuotedContent(): List<String> {
     val result = mutableListOf<String>()
     // 匹配多种引号类型
     val patterns = listOf(
-        "\u201C([^\u201D]*?)\u201D",  // 中文双引号
-        "\u2018([^\u2019]*?)\u2019",  // 中文单引号
-        """"([^"]*?)"""",  // 英文双引号
-        """'([^']*?)'""",  // 英文单引号
-        """「([^」]*?)」""",           // 直角引号
-        """『([^』]*?)』""",           // 白直角引号
+        "\u201C([^\u201D]*?)\u201D", // 中文双引号
+        "\u2018([^\u2019]*?)\u2019", // 中文单引号
+        """"([^"]*?)"""", // 英文双引号
+        """'([^']*?)'""", // 英文单引号
+        """「([^」]*?)」""", // 直角引号
+        """『([^』]*?)』""", // 白直角引号
     )
     for (pattern in patterns) {
         val regex = Regex(pattern)

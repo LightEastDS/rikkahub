@@ -365,6 +365,12 @@
      - **支持工作区提示词自定义与关闭**（`#2348`）：在 `WorkspaceEntity` / `WorkspaceDAO` / `WorkspaceRepository` 新增 `prompt_mode`（`DEFAULT` / `CUSTOM` / `DISABLED`）与 `custom_prompt` 持久化字段及 `Migration_38_39` 迁移；在 `WorkspaceReminderTransformer` 中支持关闭注入或使用自定义提示词（并保留本地 `AGENTS.md` 指令），在工作区详情页新增「工作区提示词」设置卡片与支持「填入默认模板」的编辑弹窗。
      - **修复开启模型内置搜索后仍调用 `search_web` 报错 `Tool search_web not found`**（`#2341`）：在 `AgentRequest` 与 `AgentLoop` 中新增隐藏运行时兜底工具集合 `fallbackTools`（不向模型请求声明工具，仅在模型因历史上下文或未处理内置 `web_search` 的兼容层仍发出 `search_web` / `scrape_web` 调用时兜底执行），并在 `ChatToolFactory` / `ChatRequestFactory` 中于内置搜索开启时自动注入本地搜索兜底器；同时优化工具缺失时的报错文本，避免直接暴露原始异常堆栈。
   3. **版本号升级**：升至 `3.3.0.1`（versionCode: 212）。
+* **v3.3.1.1**：
+  1. **同步官方上游 `v3.3.1`（`55a0631f`）更新**：
+     - 合并官方上游 `v3.3.1` 及 `master` 最新提交（包括发送/重新生成时用户消息置顶锚点与回复在下方展开不跟随滚动、手动压缩上下文改为对话中后台运行、长工具调用每 30 秒定期落库防止崩溃丢失、悬浮球变形阴影缓存 OOM 修复、发送图片 4MP 像素上限控制与请求 OOM 捕获提示、安全模式页导出与导入完整备份及 Room 失败直接拍库文件快照兜底、通知设置忽略电池优化入口、识别被系统停止的无障碍服务并提示重开、语音输入录音保持屏幕常亮、Shell 工具可选 `description` 步骤标题、连接测试支持模型提供商重写、Markdown 导出写入消息时间、允许删除内置默认助手并至少保留一个、Google 模型列表缺 `displayName` 回退 `modelId`、新增商汤日日新图标与扩展 NVIDIA 匹配、APIMart 媒体生成适配器与 5 秒轮询间隔、开启 VPN 时应用内更新包下载修复、以及 `bettertext` 升级至 `v0.1.6` 等）；
+     - **特性融合与纯净化延续**：在 `ChatScrollAnchor` 中融合 `/compact` 检查点与 `LazyColumn` 条目索引映射（`messageIndexToLazyIndex` / `isMessageInCompactedRange`），确保存在折叠或展开压缩区间时消息置顶锚点与跳转互不冲突；将 `guessMimeTypeFromFileName` 统一委托给 `FileUtils.guessMimeTypeFromName` 并保留 `DeepSeekImporter` 流式解析与 `/` 前缀附件兼容；在 `SettingsNormalization` 中延续内置助手可删与商业赞助商过滤清洗规则；在 `DefaultSettings` 中继续保持纯净无赞助商默认配置；
+     - 保留全部本地定制增强与独立发布签名配置。
+  2. **版本号升级**：升至 `3.3.1.1`（versionCode: 213）。
 
 
 

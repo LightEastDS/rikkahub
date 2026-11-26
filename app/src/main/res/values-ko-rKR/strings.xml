@@ -1943,4 +1943,7 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="workspace_detail_prompt_custom_empty">아직 입력되지 않았습니다. 탭하여 사용자 지정 프롬프트를 작성하세요(비어 있으면 주입되지 않음)</string>
   <string name="workspace_detail_prompt_fill_default">기본 템플릿 채우기</string>
   <string name="workspace_detail_prompt_hint">자동 감지되는 배포판, 버전, 셸 및 경로 안내를 대체할 워크스페이스 환경 설명을 직접 작성할 수 있습니다.</string>
+  <string name="setting_page_preferences_notification_battery_optimization">배터리 최적화 무시</string>
+  <string name="setting_page_preferences_notification_battery_optimization_on">허용됨. 백그라운드 생성이 시스템에 의해 중단될 가능성이 낮습니다</string>
+  <string name="setting_page_preferences_notification_battery_optimization_off">허용되지 않음. 배터리를 절약하기 위해 시스템이 백그라운드 생성을 중지할 수 있습니다.</string>
 </resources>

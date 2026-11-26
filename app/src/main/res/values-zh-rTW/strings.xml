@@ -1954,4 +1954,7 @@
   <string name="workspace_detail_prompt_custom_empty">尚未填寫，點擊編寫自訂提示詞（留空時不注入）</string>
   <string name="workspace_detail_prompt_fill_default">填入預設範本</string>
   <string name="workspace_detail_prompt_hint">可自行編寫工作區環境說明，以取代自動識別的發行版、版本號、Shell 與路徑提示。</string>
+  <string name="setting_page_preferences_notification_battery_optimization">忽略電池最佳化</string>
+  <string name="setting_page_preferences_notification_battery_optimization_on">已允許。背景生成較不容易被系統停止</string>
+  <string name="setting_page_preferences_notification_battery_optimization_off">未允許。系統可能會為了節省電量而停止背景生成</string>
 </resources>

@@ -1941,4 +1941,7 @@
   <string name="workspace_detail_prompt_custom_empty">Noch nicht festgelegt. Tippen, um einen eigenen Prompt zu schreiben (bei leerem Text wird nichts eingefügt)</string>
   <string name="workspace_detail_prompt_fill_default">Standardvorlage einfügen</string>
   <string name="workspace_detail_prompt_hint">Eigene Beschreibung der Arbeitsbereichsumgebung verfassen, um automatisch erkannte Distribution, Version, Shell und Pfade zu ersetzen.</string>
+  <string name="setting_page_preferences_notification_battery_optimization">Akkuoptimierung ignorieren</string>
+  <string name="setting_page_preferences_notification_battery_optimization_on">Zugelassen. Die Hintergrundgenerierung wird vom System seltener beendet</string>
+  <string name="setting_page_preferences_notification_battery_optimization_off">Nicht erlaubt. Das System kann die Generierung im Hintergrund stoppen, um Akku zu sparen</string>
 </resources>

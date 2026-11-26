@@ -1941,4 +1941,7 @@
   <string name="workspace_detail_prompt_custom_empty">لم يتم التعيين بعد. انقر لكتابة مطالبة مخصصة (لن يتم حقن أي شيء إذا تُركت فارغة)</string>
   <string name="workspace_detail_prompt_fill_default">ملء القالب الافتراضي</string>
   <string name="workspace_detail_prompt_hint">اكتب وصف بيئة مساحة العمل الخاص بك لاستبدال التوزيعة والإصدار والصدفة والمسارات المكتشفة تلقائياً.</string>
+  <string name="setting_page_preferences_notification_battery_optimization">تجاهل تحسين البطارية</string>
+  <string name="setting_page_preferences_notification_battery_optimization_on">مسموح. من غير المرجح أن يوقف النظام عملية التوليد في الخلفية</string>
+  <string name="setting_page_preferences_notification_battery_optimization_off">غير مسموح. قد يوقف النظام عملية التوليد في الخلفية لتوفير طاقة البطارية</string>
 </resources>

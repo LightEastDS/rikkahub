@@ -1943,4 +1943,7 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="workspace_detail_prompt_custom_empty">未設定です。タップしてカスタムプロンプトを入力（空欄の場合は注入されません）</string>
   <string name="workspace_detail_prompt_fill_default">デフォルトテンプレートを入力</string>
   <string name="workspace_detail_prompt_hint">自動検出されるディストリビューション、バージョン、シェル、パスのヒントを上書きするワークスペース説明を記述できます。</string>
+  <string name="setting_page_preferences_notification_battery_optimization">バッテリー最適化を無視</string>
+  <string name="setting_page_preferences_notification_battery_optimization_on">許可済み。バックグラウンドでの生成がシステムによって停止されにくくなります</string>
+  <string name="setting_page_preferences_notification_battery_optimization_off">許可されていません。バッテリーを節約するため、バックグラウンドでの生成が停止される場合があります</string>
 </resources>
